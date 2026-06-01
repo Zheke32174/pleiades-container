@@ -68,3 +68,8 @@ This project incorporates and builds upon the following open-source projects:
 ## License
 
 See individual component licenses. The Pleiades-sourced scripts in this repository are provided under the MIT License.
+
+
+## Framework Integration
+
+This project uses the [agents-best-practices](https://github.com/DenisSergeevitch/agents-best-practices) framework for all agent interactions. See `AGENTS.md` for the full operating contract and [Zheke32174/pleiades-factory-stack](https://github.com/Zheke32174/pleiades-factory-stack) for the AI/LLM tool chain.
