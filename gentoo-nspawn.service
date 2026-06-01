@@ -1,0 +1,18 @@
+[Unit]
+Description=Gentoo Purple Defense Container
+Documentation=https://github.com/Zheke32174/pleiades-container
+After=network.target local-fs.target
+Wants=network.target
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/systemd-nspawn -D /workspaces/gentoo/root.x86_64/ -b --network-veth -M gentoo
+ExecStop=/usr/bin/systemd-nspawn -M gentoo --poweroff
+KillMode=mixed
+Restart=on-failure
+RestartSec=30s
+TimeoutStopSec=120s
+Slice=system.slice
+
+[Install]
+WantedBy=multi-user.target
