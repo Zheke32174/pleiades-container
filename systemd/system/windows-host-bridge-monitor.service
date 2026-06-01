@@ -1,0 +1,13 @@
+[Unit]
+Description=Pleiades Windows Host Read-Only Bridge Monitor
+After=network.target host-bridge-monitor.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/windows_host_bridge_monitor.sh
+Restart=always
+RestartSec=10
+User=root
+
+[Install]
+WantedBy=multi-user.target

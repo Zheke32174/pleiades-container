@@ -1,18 +1,19 @@
 [Unit]
-Description=Gentoo Purple Defense Container
+Description=Pleiades nspawn Container (gentoo)
 Documentation=https://github.com/Zheke32174/pleiades-container
 After=network.target local-fs.target
-Wants=network.target
+Wants=systemd-networkd.service
 
 [Service]
 Type=notify
-ExecStart=/usr/bin/systemd-nspawn -D /workspaces/gentoo/root.x86_64/ -b --network-veth -M gentoo
-ExecStop=/usr/bin/systemd-nspawn -M gentoo --poweroff
+ExecStart=/usr/bin/systemd-nspawn --keep-unit --boot --network-veth -M gentoo -D /workspaces/gentoo/root.x86_64
+ExecStop=/usr/bin/machinectl poweroff gentoo
 KillMode=mixed
-Restart=on-failure
-RestartSec=30s
-TimeoutStopSec=120s
-Slice=system.slice
+Restart=always
+RestartSec=10s
+WatchdogSec=30s
+TasksMax=infinity
+CPUQuota=400%
 
 [Install]
 WantedBy=multi-user.target

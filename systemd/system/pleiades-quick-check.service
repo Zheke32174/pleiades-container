@@ -1,0 +1,14 @@
+[Unit]
+Description=Pleiades Quick Check (15s cycle — transient attack detection)
+After=pleiades-forensic-scanner.service
+Requires=pleiades-forensic-scanner.service
+
+[Service]
+ExecStart=/usr/local/bin/pleiades-quick-check.sh
+Restart=always
+RestartSec=5
+CPUQuota=20%
+MemoryMax=30M
+
+[Install]
+WantedBy=multi-user.target

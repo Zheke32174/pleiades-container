@@ -1,0 +1,34 @@
+[Unit]
+Description=Pleiades Forensic Description=Purple Forensic & Heuristic Anomaly Scanner Heuristic Anomaly Scanner
+Documentation=https://github.com/pleiades/forensic-scanner
+After=network.target pleiades-nexus-omniversal.service pleiades-atlas-omniversal.service
+Before=pleiades-adaptive-builder.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pleiades-forensic-scanner.sh
+Restart=always
+RestartSec=10
+User=root
+
+# Resource limits
+MemoryMax=100M
+MemoryHigh=64M
+CPUQuota=25%
+TasksMax=50
+LimitNOFILE=4096
+OOMScoreAdjust=500
+
+# Hardening (relaxed to allow log writes)
+ProtectSystem=full
+ReadWritePaths=/var/log/pleiades /var/lib/pleiades /var/lib/pleiades/forensic /run/pleiades
+PrivateTmp=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_SYS_PTRACE
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=pleiades.target

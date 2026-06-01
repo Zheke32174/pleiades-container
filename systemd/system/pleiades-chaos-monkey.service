@@ -1,0 +1,17 @@
+[Unit]
+Description=Pleiades Chaos Monkey Stress Test
+Documentation=https://github.com/pleiades/chaos-monkey
+After=pleiades.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pleiades-chaos-monkey.sh --gentle
+User=root
+MemoryMax=200M
+CPUQuota=50%
+NoNewPrivileges=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=pleiades.target

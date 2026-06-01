@@ -1,0 +1,21 @@
+[Unit]
+Description=Pleiades Telemetry Description=Purple Telemetry & Log Aggregation Pipeline Log Aggregation Pipeline
+Documentation=https://github.com/pleiades/telemetry
+After=pleiades-forensic-scanner.service pleiades-atlas-omniversal.service pleiades-adaptive-builder.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pleiades-telemetry-pipeline.sh
+Restart=always
+RestartSec=30
+User=root
+MemoryMax=50M
+MemoryHigh=32M
+CPUQuota=10%
+TasksMax=20
+NoNewPrivileges=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=pleiades.target

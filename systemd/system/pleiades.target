@@ -1,0 +1,11 @@
+[Unit]
+Description=Pleiades Ecosystem Target
+Documentation=https://github.com/pleiades
+Requires=pleiades-atlas-omniversal.service pleiades-nexus-omniversal.service
+After=network-online.target
+Wants=taygete-omniversal.service alcyone-omniversal.service celaeno-omniversal.service \
+      electra-omniversal.service maia.service pleiades-request-broker.service \
+      pleiades-adaptive-builder.service pleiades-forensic-scanner.service \
+      pleiades-telemetry-pipeline.service
+DefaultDependencies=no
+AllowIsolate=yes
