@@ -1,75 +1,81 @@
 # Pleiades Container
 
-**Gentoo systemd-nspawn container** — the deployment target for the [pleiades](https://github.com/Zheke32174/pleiades) security suite.
+This repository contains the Gentoo `systemd-nspawn` container layer for Pleiades.
 
-This repo contains the container scripts, systemd units, and configuration for the Gentoo systemd-nspawn container that hosts the Pleiades agent stack.
+The container hosts defensive decoy services, telemetry collectors, policy-gated automation, and forensic analysis helpers. It is designed to keep most active logic inside the container while the host provides only a minimal owner-authorized launcher and bridge.
 
-## Repositories
+For host scripts and the main agent suite, see [pleiades](https://github.com/Zheke32174/pleiades).
+
+## Intended Use
+
+This container layer is intended for:
+
+- local security labs on hardware you own or administer
+- defensive decoy and telemetry service hosting
+- forensic evidence collection
+- container recovery and rebuild testing
+
+It is **not** intended for unauthorized deployment, stealth installation, or use on systems without explicit owner authorization.
+
+## Repository Map
 
 | Repo | Purpose |
 |------|---------|
-| [pleiades](https://github.com/Zheke32174/pleiades) | Host scripts, task master, toolchain catalog |
-| **pleiades-container** (this repo) | Gentoo nspawn container — scripts, systemd units, agent stack |
-| [pleiades-evidence](https://github.com/Zheke32174/pleiades-evidence) | Private — secured evidence archive |
-| [underhall](https://github.com/Zheke32174/underhall) | Original Arch nspawn install layer |
-| [undercity](https://github.com/Zheke32174/undercity) | Backup/restore tooling |
+| [`pleiades`](https://github.com/Zheke32174/pleiades) | Host scripts and agent suite |
+| **`pleiades-container`** (this repo) | Gentoo `systemd-nspawn` container layer |
+| [`pleiades-factory-stack`](https://github.com/Zheke32174/pleiades-factory-stack) | Tooling and AI/LLM research helpers |
+| `pleiades-evidence` | Private evidence archive — never public |
 
-## Quick Start
+## What's Here
 
-```bash
-# Start the container
-sudo systemd-nspawn -D /path/to/root.x86_64 -b --network-veth -M gentoo
-
-# Or via the install scripts
-bash scripts/install-boot-persistence.sh
+```
+bootstrap-container.sh          — builds Gentoo container from scratch on any machine
+install-scripts/                — container up/down/shell helpers
+systemd/system/                 — host-side service units (pleiades-*.service)
+gentoo-nspawn.service           — main container launcher service
+gentoo-pleiades-bridge.service  — host-container telemetry bridge
 ```
 
-## Container Architecture
+## Container Components
 
-- **Distribution:** Gentoo (systemd stage 3)
-- **Virtualization:** systemd-nspawn (lightweight, no kernel emulation)
-- **Network:** veth pair, bridge to host
-- **Storage:** Ext4 image or directory-based rootfs
-- **Supervision:** systemd with multi-agent service stack
+| Service | Role |
+|---------|------|
+| `pleiades-alcyone` | Host capability inventory |
+| `pleiades-atlas`   | Recovery coordinator |
+| `pleiades-electra` | Decoy environment router |
+| `pleiades-maia`    | Container restore coordinator |
+| `pleiades-celaeno` | Policy-gated request broker |
+| `pleiades-taygete` | Health monitor and supervised restart |
 
-## Agent Suite
+## Quick Start (New Machine)
 
-The container runs 9 agents:
+```bash
+# Requirements: systemd-nspawn, git, curl, xz — run as root
 
-| Script | Agent | Role |
-|--------|-------|------|
-| `scripts/Maia.sh` | Maia | Overseer, EFI/ESP persistence, GitHub rehydration |
-| `scripts/Electra.sh` | Electra | Fake environment / honeypot |
-| `scripts/Taygete.sh` | Taygete | Credential monitor |
-| `scripts/Alcyone.sh` | Alcyone | Recon, host bridge reporting |
-| `scripts/Celaeno.sh` | Celaeno | Watchdog, process guardian |
-| `scripts/Sterope.sh` | Sterope | Cross-platform compatibility |
-| `scripts/Asterope.sh` | Asterope | BSD compatibility layer, WASM stratum |
-| `scripts/Merope.sh` | Merope | System monitoring, threat detection |
-| `scripts/Atlas.sh` | Atlas | Multi-language payload execution |
+# 1. Build the Gentoo container from a fresh stage3 tarball
+sudo bash bootstrap-container.sh
 
-## State Management
+# 2. Authenticate GitHub CLI and run operator setup
+gh auth login
+sudo bash /path/to/scripts/pleiades-setup.sh
 
-- **Backup:** `undercity archive /workspaces/gentoo/` creates state archives
-- **Restore:** `undercity restore` rehydrates from archive
-- **Boot persistence:** `scripts/install-boot-persistence.sh` installs auto-start
-- **Self-destruct:** `scripts/pleiades-selfdestruct.sh` (evidence-preserving wipe)
+# 3. Start the container
+bash install-scripts/gentoo-up.sh
 
-## Credits & Third-Party Components
+# 4. Open a shell into the container
+bash install-scripts/gentoo-shell.sh
+```
 
-This project incorporates and builds upon the following open-source projects:
+`bootstrap-container.sh` supports `--dry-run` to preview actions without making changes.
 
-- **Gentoo Linux** — Stage 3 base system ([gentoo.org](https://gentoo.org)) — GPL v2
-- **systemd** — System and service manager ([systemd.io](https://systemd.io)) — LGPL v2.1+
-- **s6-overlay** — Process supervision suite ([skarnet.org](https://skarnet.org/software/s6/)) — ISC License
-- **Bedrock Linux** — Multi-distribution strata system ([bedrocklinux.org](https://bedrocklinux.org)) — GPL v2
-- **systemd-nspawn** — Lightweight namespace container — LGPL v2.1+
+## Owner-Authorized Startup Service
+
+Installing an automatic startup service is an advanced, optional step not enabled by default. Review `experimental/owner-authorized-recovery/` in the main [pleiades](https://github.com/Zheke32174/pleiades) repo before use.
 
 ## License
 
-See individual component licenses. The Pleiades-sourced scripts in this repository are provided under the MIT License.
+MIT — see [LICENSE](LICENSE).
 
+## Security
 
-## Framework Integration
-
-This project uses the [agents-best-practices](https://github.com/DenisSergeevitch/agents-best-practices) framework for all agent interactions. See `AGENTS.md` for the full operating contract and [Zheke32174/pleiades-factory-stack](https://github.com/Zheke32174/pleiades-factory-stack) for the AI/LLM tool chain.
+See [SECURITY.md](SECURITY.md).
