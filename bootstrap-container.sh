@@ -9,8 +9,14 @@
 
 set -euo pipefail
 
-CONTAINER_ROOT="${PLEIADES_CONTAINER_ROOT:-/workspaces/gentoo/root.x86_64}"
-PLEIADES_REPO="${PLEIADES_REPO:-https://github.com/Zheke32174/pleiades.git}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONTAINER_ROOT="${PLEIADES_CONTAINER_ROOT:-${SCRIPT_DIR}/root.x86_64}"
+# PLEIADES_REPO: set this to your fork URL, or rely on gh CLI detection below
+if [[ -z "${PLEIADES_REPO:-}" ]]; then
+    _owner="$(gh api user --jq .login 2>/dev/null || true)"
+    PLEIADES_REPO="${_owner:+https://github.com/${_owner}/pleiades.git}"
+    PLEIADES_REPO="${PLEIADES_REPO:-https://github.com/Zheke32174/pleiades.git}"
+fi
 STAGE3_MIRROR="${STAGE3_MIRROR:-https://distfiles.gentoo.org/releases/amd64/autobuilds}"
 DRY_RUN=false
 
