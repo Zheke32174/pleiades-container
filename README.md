@@ -1,28 +1,27 @@
 # Pleiades Container
 
-This repository contains the Gentoo `systemd-nspawn` container layer for Pleiades.
+The Gentoo `systemd-nspawn` container layer for Pleiades.
 
-The container hosts defensive decoy services, telemetry collectors, policy-gated automation, and forensic analysis helpers. It is designed to keep most active logic inside the container while the host provides only a minimal owner-authorized launcher and bridge.
+This container hosts honeypot services, telemetry collectors, policy-gated automation, and forensic analysis helpers. The host provides a minimal launcher and bridge; the active logic runs inside the container.
 
 For host scripts and the main agent suite, see [pleiades](https://github.com/Zheke32174/pleiades).
 
-## Intended Use
+## What it's for
 
-This container layer is intended for:
-
-- local security labs on hardware you own or administer
-- defensive decoy and telemetry service hosting
-- forensic evidence collection
-- container recovery and rebuild testing
-
+- Local security labs on hardware you own or administer
+- Honeypot and decoy service hosting with local telemetry
+- Forensic evidence collection
+- Container recovery and rebuild drills
 
 ## Repository Map
 
-| Repo | Purpose |
-|------|---------|
-| [`pleiades`](https://github.com/Zheke32174/pleiades) | Host scripts and agent suite |
-| **`pleiades-container`** (this repo) | Gentoo `systemd-nspawn` container layer |
-| [`pleiades-factory-stack`](https://github.com/Zheke32174/pleiades-factory-stack) | Tooling and AI/LLM research helpers |
+| Repo | Status | Purpose |
+|------|--------|---------|
+| [`pleiades`](https://github.com/Zheke32174/pleiades) | Release-track | Host scripts and agent suite |
+| **`pleiades-container`** (this repo) | Release-track | Gentoo `systemd-nspawn` container layer |
+| [`pleiades-factory-stack`](https://github.com/Zheke32174/pleiades-factory-stack) | Release-track | Tooling and AI/LLM research helpers |
+| `pleiades-factory` | Private staging | Future factory orchestration work; not public-ready yet |
+| `pleiades-evidence` | Private forever | Forensic evidence archive — never public |
 
 ## What's Here
 
@@ -66,9 +65,15 @@ bash install-scripts/gentoo-shell.sh
 
 `bootstrap-container.sh` supports `--dry-run` to preview actions without making changes.
 
-## Owner-Authorized Startup Service
+## Automatic Startup (Optional)
 
-Installing an automatic startup service is an advanced, optional step not enabled by default. Review `experimental/owner-authorized-recovery/` in the main [pleiades](https://github.com/Zheke32174/pleiades) repo before use.
+Installing a system startup service is an optional, advanced step not enabled by default. Review `experimental/owner-authorized-recovery/` in the main [pleiades](https://github.com/Zheke32174/pleiades) repo before use.
+
+## AI Assistance Disclosure
+
+Parts of this project's documentation, planning notes, and script scaffolding were developed with assistance from AI tools, including Claude by Anthropic and ChatGPT by OpenAI.
+
+Human maintainers are responsible for reviewing, testing, security boundaries, attribution, and final repository contents.
 
 ## License
 
