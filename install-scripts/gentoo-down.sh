@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Gracefully shut down the Gentoo container.
 set -euo pipefail
-ROOT=/workspaces/gentoo/root.x86_64
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${PLEIADES_CONTAINER_ROOT:-$(dirname "$SCRIPT_DIR")/root.x86_64}"
 SESSION=gentoo
 NSPAWN=$(pgrep -x systemd-nspawn | head -1 || true)
 if [ -n "$NSPAWN" ]; then

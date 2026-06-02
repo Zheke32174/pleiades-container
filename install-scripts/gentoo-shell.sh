@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Open a root shell inside the running Gentoo container.
 set -euo pipefail
-ROOT=/workspaces/gentoo/root.x86_64
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${PLEIADES_CONTAINER_ROOT:-$(dirname "$SCRIPT_DIR")/root.x86_64}"
 NSPAWN=$(pgrep -x systemd-nspawn | head -1 || true)
 if [ -z "$NSPAWN" ]; then
   echo "gentoo not running. Run: gentoo-up" >&2

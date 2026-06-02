@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Boot the Gentoo nspawn container (systemd PID 1) in a detached tmux session.
 set -euo pipefail
-ROOT=/workspaces/gentoo/root.x86_64
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${PLEIADES_CONTAINER_ROOT:-$(dirname "$SCRIPT_DIR")/root.x86_64}"
 SESSION=gentoo
 
 if [ ! -d "$ROOT" ]; then
