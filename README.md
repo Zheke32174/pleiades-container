@@ -15,7 +15,6 @@ This container layer is intended for:
 - forensic evidence collection
 - container recovery and rebuild testing
 
-It is **not** intended for unauthorized deployment, stealth installation, or use on systems without explicit owner authorization.
 
 ## Repository Map
 
@@ -24,7 +23,6 @@ It is **not** intended for unauthorized deployment, stealth installation, or use
 | [`pleiades`](https://github.com/Zheke32174/pleiades) | Host scripts and agent suite |
 | **`pleiades-container`** (this repo) | Gentoo `systemd-nspawn` container layer |
 | [`pleiades-factory-stack`](https://github.com/Zheke32174/pleiades-factory-stack) | Tooling and AI/LLM research helpers |
-| `pleiades-evidence` | Private evidence archive — never public |
 
 ## What's Here
 
