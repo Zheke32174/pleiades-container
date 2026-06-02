@@ -1,17 +1,8 @@
 # Pleiades Container
 
-The Gentoo `systemd-nspawn` container layer for Pleiades.
+The Gentoo `systemd-nspawn` container layer for Pleiades. Run this on any machine to get the full agent suite: honeypot routing, telemetry aggregation, forensic collection, recovery coordination, and policy-gated request brokering — all inside an isolated container, with the host running only a launcher and bridge.
 
-This container hosts honeypot services, telemetry collectors, policy-gated automation, and forensic analysis helpers. The host provides a minimal launcher and bridge; the active logic runs inside the container.
-
-For host scripts and the main agent suite, see [pleiades](https://github.com/Zheke32174/pleiades).
-
-## What it's for
-
-- Local security labs on hardware you own or administer
-- Honeypot and decoy service hosting with local telemetry
-- Forensic evidence collection
-- Container recovery and rebuild drills
+For host scripts and setup, see [pleiades](https://github.com/Zheke32174/pleiades).
 
 ## Repository Map
 
@@ -44,7 +35,7 @@ gentoo-pleiades-bridge.service  — host-container telemetry bridge
 | `pleiades-celaeno` | Policy-gated request broker |
 | `pleiades-taygete` | Health monitor and supervised restart |
 
-## Quick Start (New Machine)
+## Quick Start
 
 ```bash
 # Requirements: systemd-nspawn, git, curl, xz — run as root
@@ -65,20 +56,12 @@ bash install-scripts/gentoo-shell.sh
 
 `bootstrap-container.sh` supports `--dry-run` to preview actions without making changes.
 
-## Automatic Startup (Optional)
+To install a system startup service, see `experimental/owner-authorized-recovery/` in the main [pleiades](https://github.com/Zheke32174/pleiades) repo — it's optional and not enabled by default.
 
-Installing a system startup service is an optional, advanced step not enabled by default. Review `experimental/owner-authorized-recovery/` in the main [pleiades](https://github.com/Zheke32174/pleiades) repo before use.
+## AI Assistance
 
-## AI Assistance Disclosure
+Documentation and scaffolding were partly drafted with Claude (Anthropic) and ChatGPT (OpenAI). Maintainers are responsible for testing, attribution, and security review.
 
-Parts of this project's documentation, planning notes, and script scaffolding were developed with assistance from AI tools, including Claude by Anthropic and ChatGPT by OpenAI.
+---
 
-Human maintainers are responsible for reviewing, testing, security boundaries, attribution, and final repository contents.
-
-## License
-
-MIT — see [LICENSE](LICENSE).
-
-## Security
-
-See [SECURITY.md](SECURITY.md).
+MIT — [LICENSE](LICENSE) · [SECURITY.md](SECURITY.md)
