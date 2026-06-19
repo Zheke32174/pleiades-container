@@ -6,7 +6,7 @@ Wants=systemd-networkd.service
 
 [Service]
 Type=notify
-ExecStart=/usr/bin/systemd-nspawn --keep-unit --boot --network-veth -M gentoo -D /workspaces/gentoo/root.x86_64
+ExecStart=/usr/bin/systemd-nspawn --keep-unit --boot --network-veth -M gentoo -D ${PLEIADES_ROOT:-/data/data/com.termux/files/home/pleiades}/rootfs
 ExecStop=/usr/bin/machinectl poweroff gentoo
 KillMode=mixed
 Restart=always

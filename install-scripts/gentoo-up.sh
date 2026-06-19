@@ -1,6 +1,10 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # Boot the Gentoo nspawn container (systemd PID 1) in a detached tmux session.
+source "${PLEIADES_TERMUX_LIB:-}" 2>/dev/null || true
 set -euo pipefail
+
+# Termux: no systemd-nspawn available
+[[ "${PLEIADES_ENV:-}" == "termux" ]] && echo "[gentoo-up] Termux: no systemd-nspawn, skipping" && exit 0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="${PLEIADES_CONTAINER_ROOT:-$(dirname "$SCRIPT_DIR")/root.x86_64}"
 SESSION=gentoo

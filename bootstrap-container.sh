@@ -9,6 +9,8 @@
 
 set -euo pipefail
 
+source "${PLEIADES_TERMUX_LIB:-}" 2>/dev/null || true
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONTAINER_ROOT="${PLEIADES_CONTAINER_ROOT:-${SCRIPT_DIR}/root.x86_64}"
 # PLEIADES_REPO: set this to your fork URL, or rely on gh CLI detection below
@@ -28,6 +30,13 @@ done
 log()  { echo "[pleiades-bootstrap] $*"; }
 run()  { $DRY_RUN && echo "[DRY-RUN] $*" || "$@"; }
 die()  { echo "ERROR: $*" >&2; exit 1; }
+
+# Termux guard: check before root/sudo requirements
+if [[ "${PLEIADES_ENV:-}" == "termux" ]]; then
+    log "Termux environment detected — skipping systemd-nspawn bootstrap"
+    log "See pleiades/env/bootstrap-termux.sh for Termux setup"
+    exit 0
+fi
 
 [[ "${EUID:-$(id -u)}" -ne 0 ]] && die "Run as root"
 command -v systemd-nspawn &>/dev/null || die "systemd-nspawn required (install systemd-container)"
@@ -70,9 +79,11 @@ fi
 # ── Clone Pleiades scripts into container ────────────────────────────────────
 SCRIPTS_DIR="$CONTAINER_ROOT/scripts"
 if [[ ! -d "$SCRIPTS_DIR/.git" ]]; then
+    TMP_CLONE="/tmp/_pleiades_clone_$$"
     log "Cloning Pleiades scripts..."
     run git clone --depth=1 "$PLEIADES_REPO" "$TMP_CLONE"
-    run cp -r "${TMP_CLONE:-/dev/null}/root.x86_64/scripts" "$SCRIPTS_DIR"
+    run cp -r "${TMP_CLONE}/root.x86_64/scripts" "$SCRIPTS_DIR"
+    run rm -rf "$TMP_CLONE"
     log "Scripts installed to $SCRIPTS_DIR"
 else
     log "Pleiades scripts already present — pull to update: git -C $SCRIPTS_DIR pull"
