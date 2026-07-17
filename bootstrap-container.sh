@@ -2,7 +2,7 @@
 # bootstrap-container.sh — Build the Pleiades Gentoo nspawn container from scratch
 #
 # Works on: bare metal Linux, WSL2, VPS
-# Requirements: systemd-nspawn, git, curl, tar, xz
+# Requirements for a real run: root, systemd-nspawn, git, curl, tar, xz
 #
 # Usage:
 #   sudo bash bootstrap-container.sh [--root /custom/path] [--dry-run]
@@ -13,43 +13,75 @@ source "${PLEIADES_TERMUX_LIB:-}" 2>/dev/null || true
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONTAINER_ROOT="${PLEIADES_CONTAINER_ROOT:-${SCRIPT_DIR}/root.x86_64}"
-# PLEIADES_REPO: set this to your fork URL, or rely on gh CLI detection below
+DRY_RUN=false
+
+log()  { echo "[pleiades-bootstrap] $*"; }
+run()  { $DRY_RUN && echo "[DRY-RUN] $*" || "$@"; }
+die()  { echo "ERROR: $*" >&2; exit 1; }
+usage() {
+    cat <<'USAGE'
+Usage: bootstrap-container.sh [--root PATH] [--dry-run]
+
+  --root PATH  Install or inspect the container at PATH.
+  --dry-run    Print the operations without requiring root, nspawn, or network.
+USAGE
+}
+
+while (( $# > 0 )); do
+    case "$1" in
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        --root)
+            (( $# >= 2 )) || die "--root requires a path"
+            [[ -n "$2" ]] || die "--root path cannot be empty"
+            CONTAINER_ROOT="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            die "unknown argument: $1"
+            ;;
+    esac
+done
+
+# PLEIADES_REPO: set this to your fork URL, or rely on gh CLI detection below.
 if [[ -z "${PLEIADES_REPO:-}" ]]; then
     _owner="$(gh api user --jq .login 2>/dev/null || true)"
     PLEIADES_REPO="${_owner:+https://github.com/${_owner}/pleiades.git}"
     PLEIADES_REPO="${PLEIADES_REPO:-https://github.com/Zheke32174/pleiades.git}"
 fi
 STAGE3_MIRROR="${STAGE3_MIRROR:-https://distfiles.gentoo.org/releases/amd64/autobuilds}"
-DRY_RUN=false
 
-for arg in "$@"; do
-    [[ "$arg" == "--dry-run" ]] && DRY_RUN=true
-    [[ "$arg" == "--root" ]]    && shift && CONTAINER_ROOT="$1"
-done
-
-log()  { echo "[pleiades-bootstrap] $*"; }
-run()  { $DRY_RUN && echo "[DRY-RUN] $*" || "$@"; }
-die()  { echo "ERROR: $*" >&2; exit 1; }
-
-# Termux guard: check before root/sudo requirements
+# Termux guard: check before Linux host requirements.
 if [[ "${PLEIADES_ENV:-}" == "termux" ]]; then
     log "Termux environment detected — skipping systemd-nspawn bootstrap"
     log "See pleiades/env/bootstrap-termux.sh for Termux setup"
     exit 0
 fi
 
-[[ "${EUID:-$(id -u)}" -ne 0 ]] && die "Run as root"
-command -v systemd-nspawn &>/dev/null || die "systemd-nspawn required (install systemd-container)"
+# A dry-run is an inspection operation. It must remain usable in CI and on an
+# unprivileged workstation that does not yet have the runtime installed.
+if ! $DRY_RUN; then
+    [[ "${EUID:-$(id -u)}" -eq 0 ]] || die "Run as root"
+    command -v systemd-nspawn &>/dev/null || die "systemd-nspawn required (install systemd-container)"
+fi
 
 # ── Environment detection ────────────────────────────────────────────────────
 if grep -qi microsoft /proc/version 2>/dev/null; then
     ENV="wsl"
-elif systemd-detect-virt --container -q 2>/dev/null; then
+elif command -v systemd-detect-virt &>/dev/null \
+    && systemd-detect-virt --container -q 2>/dev/null; then
     ENV="container"
 else
     ENV="bare_metal"
 fi
 log "Environment: $ENV"
+log "Container root: $CONTAINER_ROOT"
 
 # ── Stage 3 bootstrap ────────────────────────────────────────────────────────
 if [[ ! -d "$CONTAINER_ROOT/usr" ]]; then
@@ -60,7 +92,7 @@ if [[ ! -d "$CONTAINER_ROOT/usr" ]]; then
     if ! $DRY_RUN; then
         STAGE3_PATH=$(curl -fsSL "${STAGE3_MIRROR}/latest-stage3-amd64-systemd.txt" \
             | grep -v '^#' | awk '{print $1}' | head -1)
-        [[ -z "$STAGE3_PATH" ]] && die "Could not resolve stage3 path from mirror"
+        [[ -n "$STAGE3_PATH" ]] || die "Could not resolve stage3 path from mirror"
 
         STAGE3_URL="${STAGE3_MIRROR}/${STAGE3_PATH}"
         log "Downloading: $STAGE3_URL"
@@ -90,9 +122,10 @@ else
 fi
 
 # ── Install host systemd services ────────────────────────────────────────────
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$SCRIPT_DIR"
 
 for svc in "$REPO_DIR"/systemd/system/*.service; do
+    [[ -e "$svc" ]] || continue
     name="$(basename "$svc")"
     dest="/etc/systemd/system/$name"
     if [[ ! -f "$dest" ]]; then
