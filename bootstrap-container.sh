@@ -1,128 +1,161 @@
 #!/usr/bin/env bash
-# bootstrap-container.sh — Build the Pleiades Gentoo nspawn container from scratch
-#
-# Works on: bare metal Linux, WSL2, VPS
-# Requirements: systemd-nspawn, git, curl, tar, xz
-#
-# Usage:
-#   sudo bash bootstrap-container.sh [--root /custom/path] [--dry-run]
+# Build a reproducible Gentoo systemd-nspawn substrate for the canonical
+# Pleiades lean runtime. This script runs on the Linux host as root.
 
-set -euo pipefail
-
-source "${PLEIADES_TERMUX_LIB:-}" 2>/dev/null || true
+set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONTAINER_ROOT="${PLEIADES_CONTAINER_ROOT:-${SCRIPT_DIR}/root.x86_64}"
-# PLEIADES_REPO: set this to your fork URL, or rely on gh CLI detection below
-if [[ -z "${PLEIADES_REPO:-}" ]]; then
-    _owner="$(gh api user --jq .login 2>/dev/null || true)"
-    PLEIADES_REPO="${_owner:+https://github.com/${_owner}/pleiades.git}"
-    PLEIADES_REPO="${PLEIADES_REPO:-https://github.com/Zheke32174/pleiades.git}"
-fi
+CONTAINER_ROOT="${PLEIADES_CONTAINER_ROOT:-/var/lib/machines/pleiades}"
+PLEIADES_REPO="${PLEIADES_REPO:-https://github.com/Zheke32174/pleiades.git}"
+PLEIADES_REF="${PLEIADES_REF:-main}"
 STAGE3_MIRROR="${STAGE3_MIRROR:-https://distfiles.gentoo.org/releases/amd64/autobuilds}"
+STAGE3_SHA512="${STAGE3_SHA512:-}"
 DRY_RUN=false
+INSTALL_UNIT=true
+TMP_ROOT=""
 
-for arg in "$@"; do
-    [[ "$arg" == "--dry-run" ]] && DRY_RUN=true
-    [[ "$arg" == "--root" ]]    && shift && CONTAINER_ROOT="$1"
+usage() {
+    cat <<'EOF'
+Usage: sudo bash bootstrap-container.sh [options]
+
+Options:
+  --root PATH          Container root (default: /var/lib/machines/pleiades)
+  --pleiades-ref REF   Pleiades branch, tag, or commit to stage (default: main)
+  --stage3-sha512 HEX  Require this exact stage3 SHA-512 digest
+  --no-install-unit    Do not install the host systemd unit
+  --dry-run            Print mutating commands without executing them
+  -h, --help           Show this help
+
+Environment overrides:
+  PLEIADES_REPO, PLEIADES_REF, PLEIADES_CONTAINER_ROOT,
+  STAGE3_MIRROR, STAGE3_SHA512
+EOF
+}
+
+while (($#)); do
+    case "$1" in
+        --root)
+            [[ $# -ge 2 ]] || { echo "--root requires a path" >&2; exit 2; }
+            CONTAINER_ROOT="$2"; shift 2 ;;
+        --pleiades-ref)
+            [[ $# -ge 2 ]] || { echo "--pleiades-ref requires a value" >&2; exit 2; }
+            PLEIADES_REF="$2"; shift 2 ;;
+        --stage3-sha512)
+            [[ $# -ge 2 ]] || { echo "--stage3-sha512 requires a digest" >&2; exit 2; }
+            STAGE3_SHA512="$2"; shift 2 ;;
+        --no-install-unit) INSTALL_UNIT=false; shift ;;
+        --dry-run) DRY_RUN=true; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
+    esac
 done
 
-log()  { echo "[pleiades-bootstrap] $*"; }
-run()  { $DRY_RUN && echo "[DRY-RUN] $*" || "$@"; }
-die()  { echo "ERROR: $*" >&2; exit 1; }
+log() { printf '[pleiades-container] %s\n' "$*"; }
+die() { printf '[pleiades-container] ERROR: %s\n' "$*" >&2; exit 1; }
 
-# Termux guard: check before root/sudo requirements
-if [[ "${PLEIADES_ENV:-}" == "termux" ]]; then
-    log "Termux environment detected — skipping systemd-nspawn bootstrap"
-    log "See pleiades/env/bootstrap-termux.sh for Termux setup"
-    exit 0
-fi
+run() {
+    if $DRY_RUN; then
+        printf '[DRY-RUN]'
+        printf ' %q' "$@"
+        printf '\n'
+    else
+        "$@"
+    fi
+}
 
-[[ "${EUID:-$(id -u)}" -ne 0 ]] && die "Run as root"
-command -v systemd-nspawn &>/dev/null || die "systemd-nspawn required (install systemd-container)"
+cleanup() {
+    [[ -n "$TMP_ROOT" && -d "$TMP_ROOT" ]] && rm -rf -- "$TMP_ROOT"
+}
+trap cleanup EXIT
 
-# ── Environment detection ────────────────────────────────────────────────────
+[[ "${EUID:-$(id -u)}" -eq 0 ]] || die "run as root"
+for cmd in curl git tar xz sha512sum systemctl systemd-nspawn; do
+    command -v "$cmd" >/dev/null 2>&1 || die "required command not found: $cmd"
+done
+
 if grep -qi microsoft /proc/version 2>/dev/null; then
-    ENV="wsl"
+    HOST_ENV=wsl
 elif systemd-detect-virt --container -q 2>/dev/null; then
-    ENV="container"
+    HOST_ENV=container
 else
-    ENV="bare_metal"
+    HOST_ENV=linux
 fi
-log "Environment: $ENV"
+log "host environment: $HOST_ENV"
+log "container root: $CONTAINER_ROOT"
 
-# ── Stage 3 bootstrap ────────────────────────────────────────────────────────
-if [[ ! -d "$CONTAINER_ROOT/usr" ]]; then
-    log "Fetching latest Gentoo stage3..."
-    TMP_STAGE3="/tmp/_pleiades_stage3_$$"
-    run mkdir -p "$TMP_STAGE3"
+TMP_ROOT="$(mktemp -d /tmp/pleiades-container.XXXXXX)"
+
+if [[ ! -x "$CONTAINER_ROOT/usr/bin/env" ]]; then
+    log "resolving current Gentoo amd64 systemd stage3"
+    stage3_path="$(curl -fsSL "$STAGE3_MIRROR/latest-stage3-amd64-systemd.txt" \
+        | awk '!/^#/ && NF {print $1; exit}')"
+    [[ -n "$stage3_path" ]] || die "could not resolve a stage3 path"
+
+    stage3_name="$(basename "$stage3_path")"
+    stage3_url="$STAGE3_MIRROR/$stage3_path"
+    archive="$TMP_ROOT/$stage3_name"
+    digests="$TMP_ROOT/$stage3_name.DIGESTS"
+
+    log "downloading $stage3_url"
+    run curl -fL --retry 4 --retry-delay 2 --proto '=https' --tlsv1.2 \
+        "$stage3_url" -o "$archive"
 
     if ! $DRY_RUN; then
-        STAGE3_PATH=$(curl -fsSL "${STAGE3_MIRROR}/latest-stage3-amd64-systemd.txt" \
-            | grep -v '^#' | awk '{print $1}' | head -1)
-        [[ -z "$STAGE3_PATH" ]] && die "Could not resolve stage3 path from mirror"
-
-        STAGE3_URL="${STAGE3_MIRROR}/${STAGE3_PATH}"
-        log "Downloading: $STAGE3_URL"
-        curl -fsSL "$STAGE3_URL" -o "$TMP_STAGE3/stage3.tar.xz"
-
-        run mkdir -p "$CONTAINER_ROOT"
-        tar xpf "$TMP_STAGE3/stage3.tar.xz" --xattrs-include='*.*' \
-            --numeric-owner -C "$CONTAINER_ROOT"
-        rm -rf "$TMP_STAGE3"
-        log "Stage3 extracted to $CONTAINER_ROOT"
-    fi
-else
-    log "Container root exists at $CONTAINER_ROOT — skipping stage3 extract"
-fi
-
-# ── Clone Pleiades scripts into container ────────────────────────────────────
-SCRIPTS_DIR="$CONTAINER_ROOT/scripts"
-if [[ ! -d "$SCRIPTS_DIR/.git" ]]; then
-    TMP_CLONE="/tmp/_pleiades_clone_$$"
-    log "Cloning Pleiades scripts..."
-    run git clone --depth=1 "$PLEIADES_REPO" "$TMP_CLONE"
-    run cp -r "${TMP_CLONE}/root.x86_64/scripts" "$SCRIPTS_DIR"
-    run rm -rf "$TMP_CLONE"
-    log "Scripts installed to $SCRIPTS_DIR"
-else
-    log "Pleiades scripts already present — pull to update: git -C $SCRIPTS_DIR pull"
-fi
-
-# ── Install host systemd services ────────────────────────────────────────────
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-for svc in "$REPO_DIR"/systemd/system/*.service; do
-    name="$(basename "$svc")"
-    dest="/etc/systemd/system/$name"
-    if [[ ! -f "$dest" ]]; then
-        log "Installing service: $name"
-        run cp "$svc" "$dest"
-    fi
-done
-
-if ! $DRY_RUN; then
-    systemctl daemon-reload
-fi
-
-# ── WSL: write /etc/wsl.conf boot entry ──────────────────────────────────────
-if [[ "$ENV" == "wsl" ]]; then
-    WRAPPER="/usr/local/sbin/pleiades-runtime-monitor"
-    if [[ ! -f /etc/wsl.conf ]] || ! grep -q "pleiades-runtime-monitor" /etc/wsl.conf; then
-        log "Adding WSL boot entry..."
-        if ! $DRY_RUN; then
-            printf '\n[boot]\ncommand=%s\n' "$WRAPPER" >> /etc/wsl.conf
+        expected="$STAGE3_SHA512"
+        if [[ -z "$expected" ]]; then
+            curl -fL --retry 4 --retry-delay 2 --proto '=https' --tlsv1.2 \
+                "$stage3_url.DIGESTS" -o "$digests"
+            expected="$(awk -v f="$stage3_name" '$2 == f && length($1) == 128 {print $1; exit}' "$digests")"
         fi
-        log "NOTE: Run 'wsl --shutdown' then restart WSL to activate"
+        [[ "$expected" =~ ^[0-9a-fA-F]{128}$ ]] || die "no valid SHA-512 digest was available"
+        actual="$(sha512sum "$archive" | awk '{print $1}')"
+        [[ "${actual,,}" == "${expected,,}" ]] || die "stage3 SHA-512 verification failed"
+        log "stage3 SHA-512 verified"
+
+        install -d -m 0755 "$CONTAINER_ROOT"
+        tar xpf "$archive" --xattrs-include='*.*' --numeric-owner -C "$CONTAINER_ROOT"
+        log "stage3 extracted"
     fi
+else
+    log "existing rootfs detected; stage3 extraction skipped"
 fi
 
-# ── First-run operator setup ─────────────────────────────────────────────────
-log ""
-log "Container bootstrapped at: $CONTAINER_ROOT"
-log ""
-log "Next steps:"
-log "  1. Authenticate GitHub CLI:   gh auth login"
-log "  2. Configure operator:        sudo bash $SCRIPTS_DIR/pleiades-setup.sh"
-log "  3. Start container:           bash $REPO_DIR/install-scripts/gentoo-up.sh"
-log "  4. Shell into container:      bash $REPO_DIR/install-scripts/gentoo-shell.sh"
+# Stage the canonical lean runtime. It is installed from inside the container so
+# the host never mutates the guest's runtime paths piecemeal.
+repo_tmp="$TMP_ROOT/pleiades"
+log "staging Pleiades ref $PLEIADES_REF from $PLEIADES_REPO"
+if $DRY_RUN; then
+    log "would fetch Pleiades and copy lean/ to $CONTAINER_ROOT/opt/pleiades-build"
+else
+    git clone --filter=blob:none --no-checkout "$PLEIADES_REPO" "$repo_tmp"
+    git -C "$repo_tmp" fetch --depth=1 origin "$PLEIADES_REF"
+    git -C "$repo_tmp" checkout --detach FETCH_HEAD
+    [[ -x "$repo_tmp/lean/build.sh" ]] || die "selected Pleiades ref does not contain lean/build.sh"
+    rm -rf "$CONTAINER_ROOT/opt/pleiades-build"
+    install -d -m 0755 "$CONTAINER_ROOT/opt"
+    cp -a "$repo_tmp/lean" "$CONTAINER_ROOT/opt/pleiades-build"
+    printf '%s\n' "$(git -C "$repo_tmp" rev-parse HEAD)" > "$CONTAINER_ROOT/opt/pleiades-build/SOURCE_COMMIT"
+    log "canonical lean runtime staged at /opt/pleiades-build"
+fi
+
+if $INSTALL_UNIT; then
+    unit_src="$SCRIPT_DIR/systemd/system/pleiades-container.service"
+    [[ -f "$unit_src" ]] || die "missing host unit: $unit_src"
+    run install -d -m 0755 /etc/pleiades /etc/systemd/system
+    run install -m 0644 "$unit_src" /etc/systemd/system/pleiades-container.service
+    if [[ ! -f /etc/pleiades/container.env ]]; then
+        if $DRY_RUN; then
+            log "would create /etc/pleiades/container.env"
+        else
+            printf 'PLEIADES_ROOT=%s\n' "$CONTAINER_ROOT" > /etc/pleiades/container.env
+            chmod 0644 /etc/pleiades/container.env
+        fi
+    fi
+    run systemctl daemon-reload
+fi
+
+log "bootstrap complete"
+log "next steps:"
+log "  sudo systemctl start pleiades-container.service"
+log "  sudo machinectl shell root@pleiades /bin/bash -l"
+log "  inside guest: bash /opt/pleiades-build/build.sh"
