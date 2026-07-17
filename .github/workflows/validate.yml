@@ -69,22 +69,76 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Capture systemd verification report
+      - name: Capture Pleiades-owned systemd verification report
         id: systemd
         shell: bash
         run: |
-          set +e
-          mapfile -d '' units < <(
-            find systemd/system -maxdepth 1 -type f \
-              \( -name '*.service' -o -name '*.target' -o -name '*.timer' -o -name '*.socket' \) \
-              -print0 | sort -z
+          set -euo pipefail
+          shopt -s nullglob
+          units=(
+            systemd/system/pleiades*.service
+            systemd/system/host-bridge-monitor.service
+            systemd/system/windows-host-bridge-monitor.service
+            systemd/system/pleiades.target
+            gentoo-nspawn.service
+            gentoo-pleiades-bridge.service
           )
-          units+=(gentoo-nspawn.service gentoo-pleiades-bridge.service)
+          (( ${#units[@]} > 0 )) || {
+            echo 'No Pleiades-owned units found.' >&2
+            exit 1
+          }
+
+          created_paths="$(mktemp)"
+          cleanup() {
+            while IFS= read -r path; do
+              [[ -n "$path" ]] && sudo rm -f "$path"
+            done < "$created_paths"
+            rm -f "$created_paths"
+          }
+          trap cleanup EXIT
+
+          python3 - "${units[@]}" <<'PY' > /tmp/pleiades-exec-paths
+          import shlex
+          import sys
+          from pathlib import Path
+
+          directives = ("ExecStart=", "ExecStartPre=", "ExecStartPost=", "ExecStop=", "ExecStopPost=")
+          paths = set()
+          for name in sys.argv[1:]:
+              for raw in Path(name).read_text(encoding="utf-8").splitlines():
+                  line = raw.strip()
+                  if not line.startswith(directives):
+                      continue
+                  value = line.split("=", 1)[1].lstrip("-+!:@").strip()
+                  if not value:
+                      continue
+                  try:
+                      executable = shlex.split(value, posix=True)[0]
+                  except (ValueError, IndexError):
+                      continue
+                  if executable.startswith("/") and "%" not in executable:
+                      paths.add(executable)
+          for executable in sorted(paths):
+              print(executable)
+          PY
+
+          while IFS= read -r executable; do
+            [[ -n "$executable" ]] || continue
+            if [[ ! -e "$executable" ]]; then
+              sudo mkdir -p "$(dirname "$executable")"
+              printf '#!/bin/sh\nexit 0\n' | sudo tee "$executable" >/dev/null
+              sudo chmod 0755 "$executable"
+              printf '%s\n' "$executable" >> "$created_paths"
+            fi
+          done < /tmp/pleiades-exec-paths
+
+          export SYSTEMD_UNIT_PATH="$PWD/systemd/system:$PWD:/etc/systemd/system:/usr/lib/systemd/system:/lib/systemd/system"
+          set +e
           systemd-analyze verify "${units[@]}" > systemd-verify.log 2>&1
           status=$?
+          set -e
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
           cat systemd-verify.log
-          exit 0
       - name: Upload systemd verification report
         if: always()
         uses: actions/upload-artifact@v4
