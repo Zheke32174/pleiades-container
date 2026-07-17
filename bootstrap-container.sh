@@ -9,7 +9,10 @@
 
 set -euo pipefail
 
-source "${PLEIADES_TERMUX_LIB:-}" 2>/dev/null || true
+if [[ -n "${PLEIADES_TERMUX_LIB:-}" ]]; then
+    # shellcheck source=/dev/null
+    source "$PLEIADES_TERMUX_LIB"
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONTAINER_ROOT="${PLEIADES_CONTAINER_ROOT:-${SCRIPT_DIR}/root.x86_64}"
