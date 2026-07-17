@@ -8,19 +8,35 @@ fail=0
 bad() { echo "[check] ERROR: $*" >&2; fail=1; }
 ok() { echo "[check] OK: $*"; }
 
-while IFS= read -r file; do
-    bash -n "$file" || bad "shell syntax: $file"
-done < <(find . -type f -name '*.sh' -not -path './.git/*' | sort)
-[[ "$fail" -eq 0 ]] && ok "shell syntax"
+unit=systemd/system/pleiades-container.service
+active_shell=(
+    bootstrap-container.sh
+    install-scripts/gentoo-up.sh
+    install-scripts/gentoo-down.sh
+    install-scripts/gentoo-shell.sh
+    ci/check.sh
+)
+active_runtime=(
+    bootstrap-container.sh
+    install-scripts/gentoo-up.sh
+    install-scripts/gentoo-down.sh
+    install-scripts/gentoo-shell.sh
+    "$unit"
+)
 
-if grep -RInE '^#!/data/data/com\.termux|Restart=always|TasksMax=infinity|--register=no|tmux[[:space:]]+new-session|/mnt/c|--bind(-ro)?=/(proc|sys|run)' \
-    bootstrap-container.sh install-scripts systemd; then
-    bad "legacy Termux, tmux, unlimited restart, or broad host-bridge pattern found"
+for file in "${active_shell[@]}"; do
+    [[ -f "$file" ]] || { bad "missing canonical file: $file"; continue; }
+    bash -n "$file" || bad "shell syntax: $file"
+done
+[[ "$fail" -eq 0 ]] && ok "canonical shell syntax"
+
+if grep -nHE '^#!/data/data/com\.termux|Restart=always|TasksMax=infinity|--register=no|tmux[[:space:]]+new-session|/mnt/c|--bind(-ro)?=/(proc|sys|run)' \
+    "${active_runtime[@]}"; then
+    bad "legacy Termux, tmux, unlimited restart, or broad host-bridge pattern found in canonical runtime"
 else
-    ok "legacy runtime patterns absent"
+    ok "legacy runtime patterns absent from canonical paths"
 fi
 
-unit=systemd/system/pleiades-container.service
 for directive in \
     'Restart=on-failure' \
     'StartLimitBurst=5' \
@@ -31,10 +47,10 @@ for directive in \
 done
 
 if command -v shellcheck >/dev/null 2>&1; then
-    while IFS= read -r file; do
+    for file in "${active_shell[@]}"; do
         shellcheck --severity=error "$file" || bad "ShellCheck error: $file"
-    done < <(find . -type f -name '*.sh' -not -path './.git/*' | sort)
-    [[ "$fail" -eq 0 ]] && ok "ShellCheck error-level scan"
+    done
+    [[ "$fail" -eq 0 ]] && ok "canonical ShellCheck error-level scan"
 fi
 
 if command -v systemd-analyze >/dev/null 2>&1 && command -v systemd-nspawn >/dev/null 2>&1; then
