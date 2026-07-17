@@ -37,24 +37,62 @@ jobs:
             echo 'bootstrap unexpectedly accepted an unknown option' >&2
             exit 1
           fi
-      - name: ShellCheck
+      - name: Install ShellCheck
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck
+      - name: Capture ShellCheck report
+        id: shellcheck
+        shell: bash
+        run: |
+          set +e
           find . -type f -name '*.sh' -not -path './.git/*' -print0 \
-            | xargs -0 --no-run-if-empty shellcheck --severity=warning
+            | xargs -0 --no-run-if-empty shellcheck --severity=warning \
+            > shellcheck.log 2>&1
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          cat shellcheck.log
+          exit 0
+      - name: Upload ShellCheck report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-shellcheck-${{ github.sha }}
+          path: shellcheck.log
+          if-no-files-found: error
+          retention-days: 14
+      - name: Enforce ShellCheck result
+        if: always()
+        run: exit "${{ steps.shellcheck.outputs.exit_code }}"
 
   systemd-units:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify systemd unit syntax
+      - name: Capture systemd verification report
+        id: systemd
+        shell: bash
         run: |
-          set -euo pipefail
+          set +e
           mapfile -d '' units < <(
             find systemd/system -maxdepth 1 -type f \
               \( -name '*.service' -o -name '*.target' -o -name '*.timer' -o -name '*.socket' \) \
               -print0 | sort -z
           )
           units+=(gentoo-nspawn.service gentoo-pleiades-bridge.service)
-          systemd-analyze verify "${units[@]}"
+          systemd-analyze verify "${units[@]}" > systemd-verify.log 2>&1
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          cat systemd-verify.log
+          exit 0
+      - name: Upload systemd verification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-systemd-verify-${{ github.sha }}
+          path: systemd-verify.log
+          if-no-files-found: error
+          retention-days: 14
+      - name: Enforce systemd verification result
+        if: always()
+        run: exit "${{ steps.systemd.outputs.exit_code }}"
