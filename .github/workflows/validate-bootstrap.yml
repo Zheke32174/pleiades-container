@@ -1,0 +1,40 @@
+name: Validate container bootstrap
+
+on:
+  push:
+    paths:
+      - bootstrap-container.sh
+      - tests/test-bootstrap-container.sh
+      - .github/workflows/validate-bootstrap.yml
+  pull_request:
+    paths:
+      - bootstrap-container.sh
+      - tests/test-bootstrap-container.sh
+      - .github/workflows/validate-bootstrap.yml
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify test commands
+        run: |
+          set -euo pipefail
+          command -v bash
+          command -v realpath
+          command -v shellcheck
+
+      - name: Parse and lint
+        run: |
+          set -euo pipefail
+          bash -n bootstrap-container.sh
+          bash -n tests/test-bootstrap-container.sh
+          shellcheck bootstrap-container.sh tests/test-bootstrap-container.sh
+
+      - name: Exercise deterministic safety boundaries
+        run: bash tests/test-bootstrap-container.sh
