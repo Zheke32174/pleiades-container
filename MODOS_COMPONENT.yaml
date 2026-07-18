@@ -1,0 +1,39 @@
+apiVersion: modos.pleiades/v1alpha1
+kind: Component
+metadata:
+  name: pleiades-linux-container-substrate
+  repository: Zheke32174/pleiades-container
+  visibility: public
+  lifecycle: operational
+  defaultBranch: main
+spec:
+  roles:
+    - linux-node-substrate
+    - nspawn-container-runtime
+    - defensive-service-host
+  authority: local-enforcement
+  inputs:
+    - signed-workload-specs
+    - container-images
+    - isolation-policy
+  outputs:
+    - workload-status
+    - runtime-observations
+    - defensive-events
+  capabilitiesProvided:
+    - workload.container.nspawn
+    - service.defensive.host
+    - node.linux.container
+  capabilitiesRequired:
+    - host.systemd.local
+    - filesystem.container.scoped
+    - network.policy.local
+    - audit.append
+  dataClasses:
+    - public
+    - internal
+    - untrusted
+    - evidence
+  failurePolicy: degrade-local
+  promotionPolicy: signed-pr
+  notes: The container remains a replaceable execution substrate beneath PDK contracts rather than defining the MODOS object model.

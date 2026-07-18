@@ -1,132 +1,117 @@
 # Pleiades Container
 
-`pleiades-container` builds and supervises the Gentoo `systemd-nspawn` substrate used by the canonical Pleiades lean runtime.
+The Gentoo `systemd-nspawn` container substrate for Pleiades. It hosts defensive and recovery-oriented services behind an isolated Linux execution boundary while the local host kernel remains authoritative.
 
-This repository owns the **host/guest lifecycle boundary**. The defensive agents themselves live in [`pleiades/lean`](https://github.com/Zheke32174/pleiades/tree/main/lean) and are staged into the guest at `/opt/pleiades-build` during bootstrap.
+For host-side agents and policy, see [`pleiades`](https://github.com/Zheke32174/pleiades).
 
-## Current status
+## Repository map
 
-Active, but still pre-production.
+| Repo | Status | Purpose |
+|---|---|---|
+| [`pleiades`](https://github.com/Zheke32174/pleiades) | Release-track | Host scripts, node agent, and public defensive substrate |
+| **`pleiades-container`** | Release-track | Gentoo `systemd-nspawn` container substrate |
+| [`pleiades-factory-stack`](https://github.com/Zheke32174/pleiades-factory-stack) | Release-track | Tooling and AI/LLM research helpers |
+| `pleiades-factory` | Private staging | Factory orchestration research |
+| `pleiades-evidence` | Private | Forensic evidence lineage; never public runtime material |
 
-The current implementation provides:
-
-- verified Gentoo stage3 download and extraction;
-- explicit staging of a selected Pleiades branch, tag, or commit;
-- one canonical host service: `pleiades-container.service`;
-- systemd-owned supervision with restart limits and resource ceilings;
-- a private veth network namespace rather than accidental host-network sharing;
-- `machinectl`-based start, stop, and shell helpers;
-- no tmux supervisor, PID-namespace guessing, runtime `curl | sh`, or Termux paths.
-
-The deception plane is **not yet split into disposable microVMs**, and the current nspawn guest should not be treated as a final security boundary for hostile public services. See the defensive-plane migration in the main Pleiades repository.
-
-## Repository layout
+## Contents
 
 ```text
-bootstrap-container.sh                 build/stage the guest rootfs
-install-scripts/gentoo-up.sh          start through systemd
-install-scripts/gentoo-down.sh        stop through systemd
-install-scripts/gentoo-shell.sh       enter through machinectl
-systemd/system/pleiades-container.service
-                                       canonical host unit
-ci/check.sh                            static repository invariants
+bootstrap-container.sh          verified root/bootstrap installer
+install-scripts/                reviewed container up/down/shell helpers
+systemd/system/                 optional host-side service units
+gentoo-nspawn.service           main container launcher service
+gentoo-pleiades-bridge.service  host-container telemetry bridge
 ```
 
-## Requirements
+## Container services
 
-- Linux host with systemd
-- `systemd-nspawn` and `machinectl`
-- `curl`, `git`, `tar`, `xz`, and `sha512sum`
-- root privileges for bootstrap and service installation
+| Service | Role |
+|---|---|
+| `pleiades-alcyone` | Host capability inventory |
+| `pleiades-atlas` | Recovery coordinator |
+| `pleiades-electra` | Decoy environment router |
+| `pleiades-maia` | Container restore coordinator |
+| `pleiades-celaeno` | Policy-gated request broker |
+| `pleiades-taygete` | Health monitor and supervised restart |
 
-Termux is intentionally handled by the separate [`pleiades-container-termux`](https://github.com/Zheke32174/pleiades-container-termux) reference repository. WSL2 can host this substrate when systemd is enabled, but this repository no longer edits `/etc/wsl.conf` or launches nspawn through tmux.
+## Bootstrap safety model
 
-## Bootstrap
+`bootstrap-container.sh` separates container construction from host mutation.
+
+By default it:
+
+1. refuses critical host paths and unmarked existing roots;
+2. resolves a Gentoo systemd stage3 over HTTPS;
+3. verifies SHA-512 before extraction;
+4. rejects archive paths containing absolute or parent traversal;
+5. extracts into a disposable sibling staging directory before atomic placement;
+6. installs one commit-pinned Pleiades script snapshot;
+7. writes a receipt containing source repository, requested ref, resolved commit, and content-tree SHA-256;
+8. does **not** install, enable, or start host services.
+
+Mirror-provided `DIGESTS` protects transfer integrity. For an independently selected pin, provide `--stage3-sha512` or `STAGE3_SHA512`.
+
+Existing roots require `--adopt-existing-root` after inspection. Existing script snapshots require `--update-scripts` if the pinned commit or content receipt differs.
+
+## Quick start
+
+Requirements for a real build: root, `systemd-nspawn`, Git, curl, rsync, tar, and SHA-256/SHA-512 utilities.
 
 ```bash
-sudo bash bootstrap-container.sh
+# 1. Preview. Dry run performs no writes and no network requests.
+bash bootstrap-container.sh --dry-run
+
+# 2. Build the marked Gentoo root and install scripts pinned to one ref.
+sudo bash bootstrap-container.sh --pleiades-ref main
+
+# Better for reproducibility: pin an exact reviewed commit and stage3 hash.
+sudo bash bootstrap-container.sh \
+  --pleiades-ref <40-character-reviewed-commit> \
+  --stage3-sha512 <128-character-sha512>
+
+# 3. Inspect the source/content receipt before configuration.
+sudo cat root.x86_64/scripts/.pleiades-source-receipt
+
+# 4. Install missing host units only after review. This does not enable/start them.
+sudo bash bootstrap-container.sh \
+  --pleiades-ref <reviewed-ref> \
+  --install-host-services
+
+# 5. Start and inspect through the reviewed helper.
+bash install-scripts/gentoo-up.sh
+bash install-scripts/gentoo-shell.sh
 ```
 
-Default locations:
-
-```text
-Guest root:      /var/lib/machines/pleiades
-Host unit:       /etc/systemd/system/pleiades-container.service
-Host config:     /etc/pleiades/container.env
-Staged runtime:  /var/lib/machines/pleiades/opt/pleiades-build
-```
-
-The stage3 archive is checked against a SHA-512 digest from Gentoo's adjacent `DIGESTS` file. A separately recorded digest can be required explicitly:
+A custom source repository must be supplied explicitly:
 
 ```bash
 sudo bash bootstrap-container.sh \
-  --stage3-sha512 '<128-hex-character-digest>' \
-  --pleiades-ref hardening/defensive-planes-v1
+  --pleiades-repo https://github.com/example/pleiades.git \
+  --pleiades-ref <reviewed-ref>
 ```
 
-For a preview:
+The bootstrap no longer guesses a fork from GitHub CLI authentication.
 
-```bash
-sudo bash bootstrap-container.sh --dry-run
-```
+## WSL
 
-## Start and install the guest runtime
+WSL boot-file mutation is separate and default-off. `--install-wsl-boot` is accepted only when WSL is detected and `/usr/local/sbin/pleiades-runtime-monitor` already exists as an executable reviewed wrapper. The previous `/etc/wsl.conf` is copied to a timestamped backup before replacing only the `[boot]` command.
 
-```bash
-sudo systemctl enable --now pleiades-container.service
-sudo machinectl shell root@pleiades /bin/bash -l
-```
+## Promotion boundary
 
-Inside the guest:
+A successful deterministic bootstrap test does not prove a production container. Promotion still requires:
 
-```bash
-bash /opt/pleiades-build/build.sh
-systemctl enable --now pleiades-maia.service pleiades-maia-checkpoint.timer
-```
+- independently reviewed stage3 and Pleiades pins;
+- disposable extraction and boot receipts;
+- service-unit review;
+- network and capability-policy validation;
+- rollback and recovery testing;
+- live Alienware/Lenovo integration evidence.
 
-The shorter helpers remain available:
+## AI assistance
 
-```bash
-bash install-scripts/gentoo-up.sh
-bash install-scripts/gentoo-shell.sh
-bash install-scripts/gentoo-down.sh
-```
+Documentation and scaffolding were partly drafted with Claude (Anthropic) and ChatGPT (OpenAI). Maintainers remain responsible for testing, attribution, licensing, and security review.
 
-## Configuration
+---
 
-Edit `/etc/pleiades/container.env`:
-
-```bash
-PLEIADES_ROOT=/var/lib/machines/pleiades
-```
-
-The unit deliberately contains no broad host bind mounts. Host telemetry should arrive through narrow authenticated collectors, not by exposing `/proc`, `/sys`, `/run`, an entire Windows drive, or management sockets to the guest.
-
-## Security boundary
-
-The host kernel and host-local authority broker remain authoritative. The container may observe, analyze, and request bounded actions, but it must not own host boot, firmware, recovery authority, unrestricted host filesystems, or generic privileged execution.
-
-Current host-unit safeguards include:
-
-- `Restart=on-failure` with a five-failure circuit breaker;
-- finite task, CPU, and memory budgets;
-- `OOMPolicy=stop`;
-- systemd-managed shutdown and timeout behavior;
-- private veth networking;
-- no tmux or custom respawn loop.
-
-## Verification
-
-```bash
-bash ci/check.sh
-```
-
-CI also runs shell syntax checks, ShellCheck reporting, and `systemd-analyze verify` for the canonical unit.
-
-## Related repositories
-
-- [`pleiades`](https://github.com/Zheke32174/pleiades) — defensive runtime and architecture
-- [`pleiades-windows`](https://github.com/Zheke32174/pleiades-windows) — Windows collectors and status publication
-- [`pleiades-factory-stack`](https://github.com/Zheke32174/pleiades-factory-stack) — research toolchain manifests
-
-MIT — see [LICENSE](LICENSE). Security reports should follow [SECURITY.md](SECURITY.md).
+MIT — [LICENSE](LICENSE) · [SECURITY.md](SECURITY.md)
