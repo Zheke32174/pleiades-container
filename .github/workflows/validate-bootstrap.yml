@@ -21,20 +21,14 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          show-progress: false
 
-      - name: Verify test commands
-        run: |
-          set -euo pipefail
-          command -v bash
-          command -v realpath
-          command -v shellcheck
+      - name: Parse
+        run: bash -n bootstrap-container.sh && bash -n tests/test-bootstrap-container.sh
 
-      - name: Parse and lint
-        run: |
-          set -euo pipefail
-          bash -n bootstrap-container.sh
-          bash -n tests/test-bootstrap-container.sh
-          shellcheck bootstrap-container.sh tests/test-bootstrap-container.sh
+      - name: ShellCheck
+        run: shellcheck -f gcc bootstrap-container.sh tests/test-bootstrap-container.sh
 
       - name: Exercise deterministic safety boundaries
         run: bash tests/test-bootstrap-container.sh
