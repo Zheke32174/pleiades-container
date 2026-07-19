@@ -2,25 +2,133 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          show-progress: false
+
       - name: Install verification tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck systemd-container
+
+      - name: Compile release and sensitivity helpers
+        run: python3 -m py_compile ci/scan_public_repo.py scripts/write_spdx_sbom.py
+
       - name: Check repository invariants
         run: bash ci/check.sh
-      - name: ShellCheck warnings
-        run: find . -type f -name '*.sh' -not -path './.git/*' -exec shellcheck --severity=warning {} + 2>&1 || true
+
+      - name: Capture deterministic diagnostics
+        id: validation
+        shell: bash
+        run: |
+          set +e
+          bash -n \
+            bootstrap-container.sh \
+            install-scripts/install-host-service.sh \
+            tests/test-bootstrap-container.sh \
+            tests/test-install-host-service.sh \
+            scripts/package_source.sh > parse.log 2>&1
+          parse_status=$?
+
+          shellcheck -f gcc \
+            bootstrap-container.sh \
+            install-scripts/install-host-service.sh \
+            tests/test-bootstrap-container.sh \
+            tests/test-install-host-service.sh \
+            scripts/package_source.sh > shellcheck.log 2>&1
+          lint_status=$?
+
+          {
+            bash tests/test-bootstrap-container.sh
+            bash tests/test-install-host-service.sh
+          } > deterministic-tests.log 2>&1
+          test_status=$?
+
+          echo "parse_status=$parse_status" >> "$GITHUB_OUTPUT"
+          echo "lint_status=$lint_status" >> "$GITHUB_OUTPUT"
+          echo "test_status=$test_status" >> "$GITHUB_OUTPUT"
+          cat parse.log shellcheck.log deterministic-tests.log
+          exit 0
+
+      - name: Capture public-tree and history scan
+        id: sensitivity
+        shell: bash
+        run: |
+          set +e
+          python3 ci/scan_public_repo.py > sensitivity.log 2>&1
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          cat sensitivity.log
+          exit 0
+
+      - name: Preserve complete diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-validation-${{ github.sha }}
+          path: |
+            parse.log
+            shellcheck.log
+            deterministic-tests.log
+            sensitivity.log
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Enforce validation gate
+        if: always()
+        run: |
+          test "${{ steps.validation.outputs.parse_status }}" = "0"
+          test "${{ steps.validation.outputs.lint_status }}" = "0"
+          test "${{ steps.validation.outputs.test_status }}" = "0"
+          test "${{ steps.sensitivity.outputs.status }}" = "0"
+          test "$(cat VERSION)" = "0.2.0"
+
+  source-package:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          show-progress: false
+
+      - name: Build twice and prove byte reproducibility
+        run: |
+          set -euo pipefail
+          bash scripts/package_source.sh dist-one
+          bash scripts/package_source.sh dist-two
+          for first in dist-one/*; do
+            file="$(basename "$first")"
+            cmp "$first" "dist-two/$file"
+          done
+
+      - name: Verify checksum manifest
+        run: |
+          cd dist-one
+          sha256sum -c SHA256SUMS.txt
+
+      - name: Upload exact-head source candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: pleiades-container-source-${{ github.sha }}
+          path: dist-one/
+          if-no-files-found: error
+          retention-days: 30
