@@ -1,56 +1,99 @@
-name: Release
+name: source release
 
 on:
   push:
-    branches: [ main, master ]
-    tags: [ 'v*' ]
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Release version/tag, for example v0.1.0'
-        required: false
-        default: 'v0.1.0'
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
-  packages: read
+
+concurrency:
+  group: source-release
+  cancel-in-progress: false
 
 jobs:
-  release:
+  publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          show-progress: false
 
-      - name: Resolve version
-        id: version
-        shell: bash
+      - name: Install verification tools
         run: |
-          VERSION="${{ github.event.inputs.version }}"
-          if [ -z "$VERSION" ]; then VERSION="v0.1.0"; fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck systemd-container
 
-      - name: Write release notes
-        shell: bash
+      - name: Validate immutable version identity
         run: |
-          cat > RELEASE_NOTES.md <<EOF
-          # pleiades-container ${{ steps.version.outputs.version }}
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          test "$GITHUB_REF_NAME" = "v$VERSION"
 
-          Public showcase release for pleiades-container.
+      - name: Validate implementation and public history
+        run: |
+          python3 -m py_compile ci/scan_public_repo.py scripts/write_spdx_sbom.py
+          bash -n bootstrap-container.sh tests/test-bootstrap-container.sh scripts/package_source.sh
+          shellcheck bootstrap-container.sh tests/test-bootstrap-container.sh scripts/package_source.sh
+          bash ci/check.sh
+          bash tests/test-bootstrap-container.sh
+          python3 ci/scan_public_repo.py
 
-          GitHub Package:
-          ghcr.io/zheke32174/pleiades-container:latest
+      - name: Build and verify source assets
+        run: |
+          bash scripts/package_source.sh dist
+          cd dist
+          sha256sum -c SHA256SUMS.txt
 
-          GitHub provides source ZIP and source tarball assets automatically on this Release.
-          EOF
+      - name: Write download-first release notes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
 
-      - name: Create or update GitHub Release
+          version = Path("VERSION").read_text(encoding="utf-8").strip()
+          archive = f"pleiades-container-{version}.tar.gz"
+          notes = f"""# Pleiades Container {version}
+
+## Download
+
+**Download `{archive}` from the Assets section below.**
+
+This release contains the reviewed bootstrap source, lifecycle helpers, systemd unit templates, tests, and documentation. It does **not** contain a Gentoo stage3 archive, built container root filesystem, OCI image, virtual machine image, or running Pleiades service.
+
+Also download:
+
+- `SHA256SUMS.txt` to verify every asset;
+- `pleiades-container-{version}.spdx.json` for the SPDX 2.3 source inventory;
+- `pleiades-container-{version}.build-receipt.json` for the exact commit and package hashes.
+
+Start with `bash bootstrap-container.sh --dry-run`. A real build requires a reviewed Gentoo source/hash, a reviewed Pleiades source ref, root privileges, and a disposable validation host before production use.
+"""
+          Path("dist/RELEASE-NOTES.md").write_text(notes, encoding="utf-8")
+          PY
+
+      - name: Refuse release overwrite
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.version.outputs.version }}
-        shell: bash
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view "$VERSION" >/dev/null 2>&1; then
-            gh release edit "$VERSION" --target "$GITHUB_SHA" --title "pleiades-container $VERSION" --notes-file RELEASE_NOTES.md
-          else
-            gh release create "$VERSION" --target "$GITHUB_SHA" --title "pleiades-container $VERSION" --notes-file RELEASE_NOTES.md
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release $GITHUB_REF_NAME already exists"
+            exit 1
           fi
+
+      - name: Publish immutable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/*.tar.gz \
+            dist/*.spdx.json \
+            dist/*.build-receipt.json \
+            dist/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Pleiades Container ${GITHUB_REF_NAME#v}" \
+            --notes-file dist/RELEASE-NOTES.md \
+            --verify-tag
