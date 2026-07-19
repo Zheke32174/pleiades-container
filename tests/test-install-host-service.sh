@@ -11,7 +11,7 @@ expect_fail() {
     local pattern="$1"
     shift
     local output
-    if output="$($@ 2>&1)"; then
+    if output="$("$@" 2>&1)"; then
         fail "command unexpectedly succeeded: $*"
     fi
     grep -Fq -- "$pattern" <<<"$output" || fail "missing failure pattern '$pattern': $output"
