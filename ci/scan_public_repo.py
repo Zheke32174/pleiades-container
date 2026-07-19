@@ -16,6 +16,10 @@ MAX_BLOB_BYTES = 2 * 1024 * 1024
 SELF_PATH = "ci/scan_public_repo.py"
 ALLOWLIST_PATH = "ci/public-sensitivity-allowlist.json"
 SKIPPED_CONTROL_PATHS = {SELF_PATH, ALLOWLIST_PATH}
+ALLOWED_REVIEW_CLASSIFICATIONS = {
+    "synthetic-decoy-fixture",
+    "reviewed-historical-local-path",
+}
 
 
 @dataclass(frozen=True)
@@ -88,14 +92,17 @@ def load_allowlist(root: pathlib.Path) -> dict[FindingKey, str]:
             raise RuntimeError(f"allowlist finding {index} has unknown rule")
         if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{12}", digest):
             raise RuntimeError(f"allowlist finding {index} has invalid line_sha256")
-        if classification != "synthetic-decoy-fixture":
-            raise RuntimeError(f"allowlist finding {index} uses unsupported classification")
+        if classification not in ALLOWED_REVIEW_CLASSIFICATIONS:
+            raise RuntimeError(
+                f"allowlist finding {index} uses unsupported classification; "
+                f"expected one of {sorted(ALLOWED_REVIEW_CLASSIFICATIONS)}"
+            )
         if not isinstance(rationale, str) or len(rationale.strip()) < 24:
             raise RuntimeError(f"allowlist finding {index} needs a substantive rationale")
         key = (path_value, rule, digest)
         if key in result:
             raise RuntimeError(f"duplicate sensitivity allowlist finding: {key}")
-        result[key] = rationale.strip()
+        result[key] = f"{classification}: {rationale.strip()}"
     return result
 
 
@@ -174,7 +181,7 @@ def main() -> int:
         findings.extend(history_findings)
         reviewed.extend(history_reviewed)
     if reviewed:
-        print(f"REVIEWED: {len(set(reviewed))} exact synthetic-fixture finding(s) matched the checked allowlist")
+        print(f"REVIEWED: {len(set(reviewed))} exact sensitivity finding(s) matched the checked allowlist")
     if findings:
         print("Public repository sensitivity scan requires review:", file=sys.stderr)
         for finding in sorted(set(findings)):
