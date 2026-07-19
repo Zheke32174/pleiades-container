@@ -67,8 +67,16 @@ jobs:
           cat parse.log shellcheck.log deterministic-tests.log
           exit 0
 
-      - name: Scan public tree and reachable Git history
-        run: python3 ci/scan_public_repo.py
+      - name: Capture public-tree and history scan
+        id: sensitivity
+        shell: bash
+        run: |
+          set +e
+          python3 ci/scan_public_repo.py > sensitivity.log 2>&1
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          cat sensitivity.log
+          exit 0
 
       - name: Preserve complete diagnostics
         if: always()
@@ -79,6 +87,7 @@ jobs:
             parse.log
             shellcheck.log
             deterministic-tests.log
+            sensitivity.log
           if-no-files-found: error
           retention-days: 14
 
@@ -88,6 +97,7 @@ jobs:
           test "${{ steps.validation.outputs.parse_status }}" = "0"
           test "${{ steps.validation.outputs.lint_status }}" = "0"
           test "${{ steps.validation.outputs.test_status }}" = "0"
+          test "${{ steps.sensitivity.outputs.status }}" = "0"
           test "$(cat VERSION)" = "0.2.0"
 
   source-package:
