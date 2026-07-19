@@ -11,7 +11,7 @@ Type=notify
 NotifyAccess=all
 Environment=PLEIADES_ROOT=/var/lib/machines/pleiades
 EnvironmentFile=-/etc/pleiades/container.env
-ExecStart=/usr/bin/systemd-nspawn --keep-unit --boot --machine=pleiades --directory=${PLEIADES_ROOT} --network-veth --resolv-conf=copy-host
+ExecStart=/usr/bin/systemd-nspawn --settings=no --keep-unit --boot --machine=pleiades --directory=${PLEIADES_ROOT} --network-veth --resolv-conf=copy-host
 ExecStop=/usr/bin/machinectl poweroff pleiades
 Restart=on-failure
 RestartSec=15s
