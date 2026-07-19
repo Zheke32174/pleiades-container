@@ -9,11 +9,15 @@ Usage: sudo bash install-scripts/install-host-service.sh [OPTIONS]
 
 Options:
   --root PATH   Reviewed marked container root (default: /var/lib/machines/pleiades)
-  --dry-run     Validate and print the intended host writes
+  --dry-run     Validate destination compatibility and print intended host writes
   -h, --help    Show this help
 
 The helper installs the reviewed pleiades-container.service and binds its
 PLEIADES_ROOT to the selected container root. It never enables or starts it.
+
+Disposable tests may override destination directories with
+PLEIADES_SYSTEMD_UNIT_DIR and PLEIADES_CONFIG_DIR. Production defaults remain
+/etc/systemd/system and /etc/pleiades.
 EOF
 }
 
@@ -55,18 +59,48 @@ case "$ROOT" in
         ;;
 esac
 
-[[ -f "$SOURCE_UNIT" ]] || die "reviewed service unit missing: $SOURCE_UNIT"
-[[ -f "$ROOT/.pleiades-container-root" ]] || die "container root is not marked by pleiades-container: $ROOT"
+[[ -f "$SOURCE_UNIT" && ! -L "$SOURCE_UNIT" ]] || die "reviewed service unit missing or not regular: $SOURCE_UNIT"
+[[ -f "$ROOT/.pleiades-container-root" && ! -L "$ROOT/.pleiades-container-root" ]] \
+    || die "container root is not marked by pleiades-container: $ROOT"
 [[ -d "$ROOT/usr" && -d "$ROOT/etc" ]] || die "container root does not resemble a Linux root: $ROOT"
 
-UNIT_DEST="/etc/systemd/system/pleiades-container.service"
-ENV_DIR="/etc/pleiades"
+UNIT_DIR="$(realpath -m -- "${PLEIADES_SYSTEMD_UNIT_DIR:-/etc/systemd/system}")"
+ENV_DIR="$(realpath -m -- "${PLEIADES_CONFIG_DIR:-/etc/pleiades}")"
+UNIT_DEST="$UNIT_DIR/pleiades-container.service"
 ENV_DEST="$ENV_DIR/container.env"
 ENV_CONTENT="PLEIADES_ROOT=$ROOT"
 
+validate_destinations() {
+    if [[ -L "$UNIT_DEST" ]]; then
+        die "refusing symlink host unit destination: $UNIT_DEST"
+    fi
+    if [[ -e "$UNIT_DEST" ]]; then
+        cmp -s "$SOURCE_UNIT" "$UNIT_DEST" \
+            || die "refusing to overwrite differing host unit: $UNIT_DEST"
+    fi
+
+    if [[ -L "$ENV_DEST" ]]; then
+        die "refusing symlink host root binding: $ENV_DEST"
+    fi
+    if [[ -e "$ENV_DEST" ]]; then
+        cmp -s <(printf '%s\n' "$ENV_CONTENT") "$ENV_DEST" \
+            || die "refusing to overwrite differing host root binding: $ENV_DEST"
+    fi
+}
+
+validate_destinations
+
 if $DRY_RUN; then
-    log "Would install or verify $UNIT_DEST from $SOURCE_UNIT"
-    log "Would install or verify $ENV_DEST with: $ENV_CONTENT"
+    if [[ -e "$UNIT_DEST" ]]; then
+        log "Host unit already matches: $UNIT_DEST"
+    else
+        log "Would install $UNIT_DEST from $SOURCE_UNIT"
+    fi
+    if [[ -e "$ENV_DEST" ]]; then
+        log "Host root binding already matches: $ENV_DEST"
+    else
+        log "Would install $ENV_DEST with: $ENV_CONTENT"
+    fi
     log "Would run systemctl daemon-reload"
     log "Would not enable or start pleiades-container.service"
     exit 0
@@ -74,31 +108,56 @@ fi
 
 [[ "${EUID:-$(id -u)}" -eq 0 ]] || die "run as root (or use --dry-run)"
 command -v systemctl >/dev/null 2>&1 || die "systemctl is required"
+command -v ln >/dev/null 2>&1 || die "ln is required"
 
-if [[ -e "$UNIT_DEST" ]]; then
-    cmp -s "$SOURCE_UNIT" "$UNIT_DEST" || die "refusing to overwrite differing host unit: $UNIT_DEST"
-    log "Host unit already matches"
-else
-    install -m 0644 "$SOURCE_UNIT" "$UNIT_DEST"
-    log "Installed $UNIT_DEST"
-fi
+install -d -m 0755 "$UNIT_DIR" "$ENV_DIR"
 
-install -d -m 0755 "$ENV_DIR"
+TMP_UNIT="$(mktemp "$UNIT_DIR/.pleiades-container.service.XXXXXX")"
 TMP_ENV="$(mktemp "$ENV_DIR/.container.env.XXXXXX")"
-cleanup() { [[ ! -e "$TMP_ENV" ]] || rm -f -- "$TMP_ENV"; }
+CREATED_UNIT=0
+CREATED_ENV=0
+COMMITTED=0
+
+cleanup() {
+    [[ ! -e "${TMP_UNIT:-}" ]] || rm -f -- "$TMP_UNIT"
+    [[ ! -e "${TMP_ENV:-}" ]] || rm -f -- "$TMP_ENV"
+    if [[ "$COMMITTED" != "1" ]]; then
+        if [[ "$CREATED_ENV" == "1" ]]; then
+            rm -f -- "$ENV_DEST"
+        fi
+        if [[ "$CREATED_UNIT" == "1" ]]; then
+            rm -f -- "$UNIT_DEST"
+        fi
+    fi
+}
 trap cleanup EXIT INT TERM HUP
+
+install -m 0644 "$SOURCE_UNIT" "$TMP_UNIT"
 printf '%s\n' "$ENV_CONTENT" > "$TMP_ENV"
 chmod 0644 "$TMP_ENV"
 
+# Recheck after staging, then use same-filesystem hard links as atomic
+# no-clobber publication. A destination appearing concurrently causes
+# refusal rather than replacement.
+validate_destinations
+
+if [[ -e "$UNIT_DEST" ]]; then
+    log "Host unit already matches"
+else
+    ln -- "$TMP_UNIT" "$UNIT_DEST" || die "host unit destination appeared during install: $UNIT_DEST"
+    CREATED_UNIT=1
+    log "Installed $UNIT_DEST"
+fi
+
 if [[ -e "$ENV_DEST" ]]; then
-    cmp -s "$TMP_ENV" "$ENV_DEST" || die "refusing to overwrite differing host root binding: $ENV_DEST"
     log "Host root binding already matches"
 else
-    mv -- "$TMP_ENV" "$ENV_DEST"
-    TMP_ENV=""
+    ln -- "$TMP_ENV" "$ENV_DEST" || die "host root binding appeared during install: $ENV_DEST"
+    CREATED_ENV=1
     log "Installed $ENV_DEST"
 fi
 
-systemctl daemon-reload
+systemctl daemon-reload || die "systemctl daemon-reload failed; rolling back files created by this invocation"
+COMMITTED=1
 log "Reloaded systemd"
 log "Service remains disabled and stopped. Review, then use systemctl start pleiades-container.service explicitly."
