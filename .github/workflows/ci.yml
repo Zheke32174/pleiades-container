@@ -28,6 +28,9 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck systemd-container
 
+      - name: Compile release and sensitivity helpers
+        run: python3 -m py_compile ci/scan_public_repo.py scripts/write_spdx_sbom.py
+
       - name: Check repository invariants
         run: bash ci/check.sh
 
@@ -36,9 +39,9 @@ jobs:
         shell: bash
         run: |
           set +e
-          bash -n bootstrap-container.sh tests/test-bootstrap-container.sh > parse.log 2>&1
+          bash -n bootstrap-container.sh tests/test-bootstrap-container.sh scripts/package_source.sh > parse.log 2>&1
           parse_status=$?
-          shellcheck -f gcc bootstrap-container.sh tests/test-bootstrap-container.sh > shellcheck.log 2>&1
+          shellcheck -f gcc bootstrap-container.sh tests/test-bootstrap-container.sh scripts/package_source.sh > shellcheck.log 2>&1
           lint_status=$?
           bash tests/test-bootstrap-container.sh > bootstrap-tests.log 2>&1
           test_status=$?
@@ -47,6 +50,9 @@ jobs:
           echo "test_status=$test_status" >> "$GITHUB_OUTPUT"
           cat parse.log shellcheck.log bootstrap-tests.log
           exit 0
+
+      - name: Scan public tree and reachable Git history
+        run: python3 ci/scan_public_repo.py
 
       - name: Preserve complete diagnostics
         if: always()
@@ -66,3 +72,37 @@ jobs:
           test "${{ steps.bootstrap.outputs.parse_status }}" = "0"
           test "${{ steps.bootstrap.outputs.lint_status }}" = "0"
           test "${{ steps.bootstrap.outputs.test_status }}" = "0"
+          test "$(cat VERSION)" = "0.2.0"
+
+  source-package:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          show-progress: false
+
+      - name: Build twice and prove byte reproducibility
+        run: |
+          set -euo pipefail
+          bash scripts/package_source.sh dist-one
+          bash scripts/package_source.sh dist-two
+          for first in dist-one/*; do
+            file="$(basename "$first")"
+            cmp "$first" "dist-two/$file"
+          done
+
+      - name: Verify checksum manifest
+        run: |
+          cd dist-one
+          sha256sum -c SHA256SUMS.txt
+
+      - name: Upload exact-head source candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: pleiades-container-source-${{ github.sha }}
+          path: dist-one/
+          if-no-files-found: error
+          retention-days: 30
