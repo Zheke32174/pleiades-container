@@ -34,21 +34,37 @@ jobs:
       - name: Check repository invariants
         run: bash ci/check.sh
 
-      - name: Capture deterministic bootstrap diagnostics
-        id: bootstrap
+      - name: Capture deterministic diagnostics
+        id: validation
         shell: bash
         run: |
           set +e
-          bash -n bootstrap-container.sh tests/test-bootstrap-container.sh scripts/package_source.sh > parse.log 2>&1
+          bash -n \
+            bootstrap-container.sh \
+            install-scripts/install-host-service.sh \
+            tests/test-bootstrap-container.sh \
+            tests/test-install-host-service.sh \
+            scripts/package_source.sh > parse.log 2>&1
           parse_status=$?
-          shellcheck -f gcc bootstrap-container.sh tests/test-bootstrap-container.sh scripts/package_source.sh > shellcheck.log 2>&1
+
+          shellcheck -f gcc \
+            bootstrap-container.sh \
+            install-scripts/install-host-service.sh \
+            tests/test-bootstrap-container.sh \
+            tests/test-install-host-service.sh \
+            scripts/package_source.sh > shellcheck.log 2>&1
           lint_status=$?
-          bash tests/test-bootstrap-container.sh > bootstrap-tests.log 2>&1
+
+          {
+            bash tests/test-bootstrap-container.sh
+            bash tests/test-install-host-service.sh
+          } > deterministic-tests.log 2>&1
           test_status=$?
+
           echo "parse_status=$parse_status" >> "$GITHUB_OUTPUT"
           echo "lint_status=$lint_status" >> "$GITHUB_OUTPUT"
           echo "test_status=$test_status" >> "$GITHUB_OUTPUT"
-          cat parse.log shellcheck.log bootstrap-tests.log
+          cat parse.log shellcheck.log deterministic-tests.log
           exit 0
 
       - name: Scan public tree and reachable Git history
@@ -62,16 +78,16 @@ jobs:
           path: |
             parse.log
             shellcheck.log
-            bootstrap-tests.log
+            deterministic-tests.log
           if-no-files-found: error
           retention-days: 14
 
-      - name: Enforce bootstrap gate
+      - name: Enforce validation gate
         if: always()
         run: |
-          test "${{ steps.bootstrap.outputs.parse_status }}" = "0"
-          test "${{ steps.bootstrap.outputs.lint_status }}" = "0"
-          test "${{ steps.bootstrap.outputs.test_status }}" = "0"
+          test "${{ steps.validation.outputs.parse_status }}" = "0"
+          test "${{ steps.validation.outputs.lint_status }}" = "0"
+          test "${{ steps.validation.outputs.test_status }}" = "0"
           test "$(cat VERSION)" = "0.2.0"
 
   source-package:
