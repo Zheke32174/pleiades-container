@@ -1,0 +1,26 @@
+{
+  "schema": "pleiades.public-sensitivity-review/v1",
+  "findings": [
+    {
+      "path": "scripts/Taygete.sh",
+      "rule": "linux-user-home",
+      "line_sha256": "2d4a358a5acc",
+      "classification": "synthetic-decoy-fixture",
+      "rationale": "Static example home path in retired test content; not operator or user data and absent from the current release surface."
+    },
+    {
+      "path": "scripts/Taygete.sh",
+      "rule": "linux-user-home",
+      "line_sha256": "4a6666c39440",
+      "classification": "synthetic-decoy-fixture",
+      "rationale": "Static example home path in retired test content; not operator or user data and absent from the current release surface."
+    },
+    {
+      "path": "scripts/Taygete.sh",
+      "rule": "linux-user-home",
+      "line_sha256": "ef43161e7eb7",
+      "classification": "synthetic-decoy-fixture",
+      "rationale": "Static example home path in retired test content; not operator or user data and absent from the current release surface."
+    }
+  ]
+}
