@@ -1,0 +1,50 @@
+apiVersion: modos.pleiades/v1alpha1
+kind: Component
+metadata:
+  name: pleiades-container-substrate
+  repository: Zheke32174/pleiades-container
+  visibility: public
+  lifecycle: operational
+  defaultBranch: main
+  labels:
+    modos.pleiades/subsystem: domain-runtime
+    modos.pleiades/organ-class: container-substrate
+spec:
+  roles:
+    - defensive-container-substrate
+    - isolated-service-runtime
+    - local-telemetry-source
+  authority: local-enforcement
+  inputs:
+    - steward-approved-container-configuration
+    - host-kernel-resources
+    - bounded-local-service-intent
+  outputs:
+    - container-service-state
+    - defensive-telemetry
+    - local-audit-events
+  capabilitiesProvided:
+    - runtime.container.systemd-nspawn@v1alpha1
+  capabilitiesRequired:
+    - host.kernel.local@v1alpha1
+    - governance.contract.validate@v1alpha1
+  dataClasses:
+    - public
+    - internal
+    - evidence
+    - untrusted
+  failurePolicy: degrade-local
+  promotionPolicy: evidence-gated
+  relations:
+    - type: subsystem-of
+      targetRef: component:pleiades-defensive-substrate
+      scope: runtime
+      required: true
+    - type: governed-by
+      targetRef: repo:Zheke32174/pleiades
+      scope: governance
+      required: true
+  notes: >-
+    This repository supplies a bounded local container substrate. It does not
+    grant domain authority and remains subordinate to host-kernel sovereignty
+    and promoted Pleiades contracts.
