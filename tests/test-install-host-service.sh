@@ -17,6 +17,13 @@ expect_fail() {
     fi
     grep -Fq -- "$pattern" <<<"$output" || fail "missing failure pattern '$pattern': $output"
 }
+assert_reload_count() {
+    local expected="$1"
+    local log_path="$2"
+    local actual
+    actual="$(grep -c '^daemon-reload$' "$log_path" || true)"
+    [[ "$actual" == "$expected" ]] || fail "expected $expected daemon-reload calls, got $actual: $(cat "$log_path")"
+}
 
 bash -n "$SCRIPT"
 grep -Fq -- '--settings=no' "$UNIT_SOURCE" \
@@ -74,6 +81,10 @@ cat > "$FAKE_BIN/systemctl" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$SYSTEMCTL_LOG"
 if [[ "$1" == "daemon-reload" ]]; then
+    calls="$(wc -l < "$SYSTEMCTL_LOG")"
+    if ((calls <= ${FAKE_SYSTEMCTL_FAIL_COUNT:-0})); then
+        exit 1
+    fi
     exit "${FAKE_SYSTEMCTL_RC:-0}"
 fi
 exit 97
@@ -94,18 +105,18 @@ cmp -s "$UNIT_SOURCE" "$SUCCESS_UNIT_DIR/pleiades-container.service" \
     || fail "installed unit differs from reviewed source"
 printf 'PLEIADES_ROOT=%s\n' "$MARKED" | cmp -s - "$SUCCESS_CONFIG_DIR/container.env" \
     || fail "installed root binding differs"
-[[ "$(cat "$SYSTEMCTL_LOG")" == "daemon-reload" ]] \
-    || fail "installer invoked unexpected systemctl action: $(cat "$SYSTEMCTL_LOG")"
+assert_reload_count 1 "$SYSTEMCTL_LOG"
 
-# A daemon-reload failure removes only files created by this invocation.
+# Initial reload failure must remove current-invocation files and reconcile the
+# systemd manager against the restored filesystem with one compensating reload.
 ROLLBACK_UNIT_DIR="$TMP/rollback-systemd"
 ROLLBACK_CONFIG_DIR="$TMP/rollback-config"
 ROLLBACK_LOG="$TMP/systemctl-rollback.log"
-expect_fail "rolling back files created" \
+expect_fail "reconciled by a compensating daemon-reload" \
     sudo env \
         PATH="$FAKE_BIN:/usr/bin:/bin" \
         SYSTEMCTL_LOG="$ROLLBACK_LOG" \
-        FAKE_SYSTEMCTL_RC=1 \
+        FAKE_SYSTEMCTL_FAIL_COUNT=1 \
         PLEIADES_SYSTEMD_UNIT_DIR="$ROLLBACK_UNIT_DIR" \
         PLEIADES_CONFIG_DIR="$ROLLBACK_CONFIG_DIR" \
         bash "$SCRIPT" --root "$MARKED"
@@ -113,19 +124,39 @@ expect_fail "rolling back files created" \
     || fail "failed transaction left a newly created unit"
 [[ ! -e "$ROLLBACK_CONFIG_DIR/container.env" ]] \
     || fail "failed transaction left a newly created environment binding"
+assert_reload_count 2 "$ROLLBACK_LOG"
 
-# Matching pre-existing files survive a later reload failure.
+# If both the original and compensating reload fail, report manager uncertainty.
+UNCERTAIN_UNIT_DIR="$TMP/uncertain-systemd"
+UNCERTAIN_CONFIG_DIR="$TMP/uncertain-config"
+UNCERTAIN_LOG="$TMP/systemctl-uncertain.log"
+expect_fail "systemd manager state is uncertain and requires manual reconciliation" \
+    sudo env \
+        PATH="$FAKE_BIN:/usr/bin:/bin" \
+        SYSTEMCTL_LOG="$UNCERTAIN_LOG" \
+        FAKE_SYSTEMCTL_FAIL_COUNT=2 \
+        PLEIADES_SYSTEMD_UNIT_DIR="$UNCERTAIN_UNIT_DIR" \
+        PLEIADES_CONFIG_DIR="$UNCERTAIN_CONFIG_DIR" \
+        bash "$SCRIPT" --root "$MARKED"
+[[ ! -e "$UNCERTAIN_UNIT_DIR/pleiades-container.service" ]] \
+    || fail "uncertain transaction left a newly created unit"
+[[ ! -e "$UNCERTAIN_CONFIG_DIR/container.env" ]] \
+    || fail "uncertain transaction left a newly created environment binding"
+assert_reload_count 2 "$UNCERTAIN_LOG"
+
+# Matching pre-existing files survive both failed reload attempts unchanged.
 PRESERVE_UNIT_DIR="$TMP/preserve-systemd"
 PRESERVE_CONFIG_DIR="$TMP/preserve-config"
 sudo install -d -m 0755 "$PRESERVE_UNIT_DIR" "$PRESERVE_CONFIG_DIR"
 sudo install -m 0644 "$UNIT_SOURCE" "$PRESERVE_UNIT_DIR/pleiades-container.service"
 printf 'PLEIADES_ROOT=%s\n' "$MARKED" | sudo tee "$PRESERVE_CONFIG_DIR/container.env" >/dev/null
 sudo chmod 0644 "$PRESERVE_CONFIG_DIR/container.env"
-expect_fail "rolling back files created" \
+PRESERVE_LOG="$TMP/systemctl-preserve.log"
+expect_fail "systemd manager state is uncertain" \
     sudo env \
         PATH="$FAKE_BIN:/usr/bin:/bin" \
-        SYSTEMCTL_LOG="$TMP/systemctl-preserve.log" \
-        FAKE_SYSTEMCTL_RC=1 \
+        SYSTEMCTL_LOG="$PRESERVE_LOG" \
+        FAKE_SYSTEMCTL_FAIL_COUNT=2 \
         PLEIADES_SYSTEMD_UNIT_DIR="$PRESERVE_UNIT_DIR" \
         PLEIADES_CONFIG_DIR="$PRESERVE_CONFIG_DIR" \
         bash "$SCRIPT" --root "$MARKED"
@@ -133,5 +164,6 @@ cmp -s "$UNIT_SOURCE" "$PRESERVE_UNIT_DIR/pleiades-container.service" \
     || fail "rollback altered a matching pre-existing unit"
 printf 'PLEIADES_ROOT=%s\n' "$MARKED" | cmp -s - "$PRESERVE_CONFIG_DIR/container.env" \
     || fail "rollback altered a matching pre-existing binding"
+assert_reload_count 2 "$PRESERVE_LOG"
 
 printf 'PASS: host-service binding helper\n'
