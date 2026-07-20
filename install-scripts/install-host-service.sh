@@ -118,16 +118,22 @@ CREATED_UNIT=0
 CREATED_ENV=0
 COMMITTED=0
 
+rollback_created_files() {
+    if [[ "$CREATED_ENV" == "1" ]]; then
+        rm -f -- "$ENV_DEST"
+        CREATED_ENV=0
+    fi
+    if [[ "$CREATED_UNIT" == "1" ]]; then
+        rm -f -- "$UNIT_DEST"
+        CREATED_UNIT=0
+    fi
+}
+
 cleanup() {
     [[ ! -e "${TMP_UNIT:-}" ]] || rm -f -- "$TMP_UNIT"
     [[ ! -e "${TMP_ENV:-}" ]] || rm -f -- "$TMP_ENV"
     if [[ "$COMMITTED" != "1" ]]; then
-        if [[ "$CREATED_ENV" == "1" ]]; then
-            rm -f -- "$ENV_DEST"
-        fi
-        if [[ "$CREATED_UNIT" == "1" ]]; then
-            rm -f -- "$UNIT_DEST"
-        fi
+        rollback_created_files
     fi
 }
 trap cleanup EXIT INT TERM HUP
@@ -157,7 +163,24 @@ else
     log "Installed $ENV_DEST"
 fi
 
-systemctl daemon-reload || die "systemctl daemon-reload failed; rolling back files created by this invocation"
+set +e
+systemctl daemon-reload
+RELOAD_RC=$?
+set -e
+if ((RELOAD_RC != 0)); then
+    rollback_created_files
+
+    set +e
+    systemctl daemon-reload
+    COMPENSATION_RC=$?
+    set -e
+
+    if ((COMPENSATION_RC != 0)); then
+        die "systemctl daemon-reload failed (rc=$RELOAD_RC); files were rolled back, but compensating daemon-reload also failed (rc=$COMPENSATION_RC); systemd manager state is uncertain and requires manual reconciliation"
+    fi
+    die "systemctl daemon-reload failed (rc=$RELOAD_RC); files were rolled back and systemd manager state was reconciled by a compensating daemon-reload"
+fi
+
 COMMITTED=1
 log "Reloaded systemd"
 log "Service remains disabled and stopped. Review, then use systemctl start pleiades-container.service explicitly."
