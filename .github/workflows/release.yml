@@ -14,39 +14,65 @@ concurrency:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
           show-progress: false
+          persist-credentials: false
 
       - name: Install verification tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck systemd-container
 
-      - name: Validate immutable version identity
+      - name: Validate immutable version identity and main ancestry
         run: |
           set -euo pipefail
           VERSION="$(tr -d '[:space:]' < VERSION)"
           test "$GITHUB_REF_NAME" = "v$VERSION"
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main || {
+            echo "::error::Tagged commit is not reachable from main"
+            exit 1
+          }
 
       - name: Validate implementation and public history
         run: |
           python3 -m py_compile ci/scan_public_repo.py scripts/write_spdx_sbom.py
-          bash -n bootstrap-container.sh tests/test-bootstrap-container.sh scripts/package_source.sh
-          shellcheck bootstrap-container.sh tests/test-bootstrap-container.sh scripts/package_source.sh
+          bash -n \
+            bootstrap-container.sh \
+            install-scripts/install-host-service.sh \
+            tests/test-bootstrap-container.sh \
+            tests/test-install-host-service.sh \
+            scripts/package_source.sh
+          shellcheck \
+            bootstrap-container.sh \
+            install-scripts/install-host-service.sh \
+            tests/test-bootstrap-container.sh \
+            tests/test-install-host-service.sh \
+            scripts/package_source.sh
           bash ci/check.sh
           bash tests/test-bootstrap-container.sh
+          bash tests/test-install-host-service.sh
           python3 ci/scan_public_repo.py
 
       - name: Build and verify source assets
         run: |
-          bash scripts/package_source.sh dist
-          cd dist
+          set -euo pipefail
+          bash scripts/package_source.sh dist-one
+          bash scripts/package_source.sh dist-two
+          for first in dist-one/*; do
+            file="$(basename "$first")"
+            cmp "$first" "dist-two/$file"
+          done
+          cd dist-one
           sha256sum -c SHA256SUMS.txt
+          cd ..
+          mv dist-one dist
+          rm -rf dist-two
 
       - name: Write download-first release notes
         run: |
@@ -69,6 +95,13 @@ Also download:
 - `pleiades-container-{version}.spdx.json` for the SPDX 2.3 source inventory;
 - `pleiades-container-{version}.build-receipt.json` for the exact commit and package hashes.
 
+Verify the downloaded files before use:
+
+```bash
+sha256sum -c SHA256SUMS.txt
+gh release verify-asset v{version} {archive}
+```
+
 Start with `bash bootstrap-container.sh --dry-run`. A real build requires a reviewed Gentoo source/hash, a reviewed Pleiades source ref, root privileges, and a disposable validation host before production use.
 """
           Path("dist/RELEASE-NOTES.md").write_text(notes, encoding="utf-8")
@@ -83,7 +116,7 @@ Start with `bash bootstrap-container.sh --dry-run`. A real build requires a revi
             exit 1
           fi
 
-      - name: Publish immutable GitHub release
+      - name: Publish GitHub source release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
