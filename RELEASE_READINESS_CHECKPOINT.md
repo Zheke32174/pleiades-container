@@ -12,8 +12,8 @@ Release authority exercised: no
 
 - Last fully validated implementation head before workflow hardening: `8eaf60a2392d1c457cdc7c42fc8be9b598fdba73`
 - Exact successful CI run for that head: `29709096507`
-- Workflow-hardening head: `ce2adb796e0b70f4e2b3ea7899a5f98d434b5734`
-- Exact-head validation for the workflow-hardening head: pending
+- Fully validated workflow-and-ledger head: `d7dbb944da91dfe5899f73cd3fbe7b4d8148edcf`
+- Exact successful CI run for the workflow-and-ledger head: `29889968094`
 
 ## Completed scope
 
@@ -33,20 +33,22 @@ Release authority exercised: no
 
 ## Validation receipts
 
-At head `8eaf60a2392d1c457cdc7c42fc8be9b598fdba73`, CI run `29709096507` passed the complete source gate then present on the branch, including:
+At head `d7dbb944da91dfe5899f73cd3fbe7b4d8148edcf`, CI run `29889968094` passed completely:
 
+- immutable full-SHA Action checkout;
 - Python helper compilation;
 - shell parsing and ShellCheck;
 - repository invariants;
 - bootstrap fixtures;
 - transactional host-binding fixtures;
 - current-tree and reachable-history sensitivity scanning;
+- complete diagnostic artifact upload;
 - deterministic double-build packaging;
 - byte-for-byte asset comparison;
 - checksum-manifest verification;
-- exact-head candidate upload.
+- exact-head source-candidate upload.
 
-The current head requires a fresh exact-head receipt because workflow behavior changed. No release workflow has been executed; doing so would require a tag and publication authority outside this checkpoint.
+This closes the ordinary source/workflow uncertainty. No release workflow has been executed; doing so would require a tag and publication authority outside this checkpoint.
 
 ## External practices applied
 
@@ -66,13 +68,12 @@ Primary references reviewed:
 
 ## Open blockers
 
-1. The current workflow-hardening head needs one complete exact-head CI receipt.
-2. PRs `#5`, `#6`, and `#9` must be reviewed and integrated in dependency order; the top branch must not be merged independently onto `main`.
-3. A disposable Linux host must prove the pinned stage source, safe construction, boot, lifecycle commands, networking assumptions, second-run behavior, drift refusal, host-binding rollback, and cleanup.
-4. One explicitly authorized disposable prerelease must prove actual GitHub assets, checksums, consumer verification, overwrite refusal, and download instructions.
-5. Artifact attestations remain deferred until the prerelease includes a consumer verification step; generating unconsumed attestations would not close a release gate.
-6. Branch protection, full-SHA Action policy, immutable-release configuration, and private vulnerability reporting require administrative verification.
-7. Recursive dependency and source-lock policy must be revisited if the release begins bundling submodules, language packages, a stage3, or a built root filesystem.
+1. PRs `#5`, `#6`, and `#9` must be reviewed and integrated in dependency order; the top branch must not be merged independently onto `main`.
+2. A disposable Linux host must prove the pinned stage source, safe construction, boot, lifecycle commands, networking assumptions, second-run behavior, drift refusal, host-binding rollback, and cleanup.
+3. One explicitly authorized disposable prerelease must prove actual GitHub assets, checksums, consumer verification, overwrite refusal, and download instructions.
+4. Artifact attestations remain deferred until the prerelease includes a consumer verification step; generating unconsumed attestations would not close a release gate.
+5. Branch protection, full-SHA Action policy, immutable-release configuration, and private vulnerability reporting require administrative verification.
+6. Recursive dependency and source-lock policy must be revisited if the release begins bundling submodules, language packages, a stage3, or a built root filesystem.
 
 ## Deferred work
 
@@ -96,4 +97,4 @@ Reprocess this repository when any of the following changes:
 
 ## Next action
 
-Inspect CI for the exact current head. If it passes, stop ordinary source reprocessing and retain `HOLD` for stacked integration, disposable-host validation, administrative settings, and one authorized prerelease. If it fails, repair only the exact workflow or source defect on this same branch.
+Skip further ordinary source reprocessing while the branch and evidence remain unchanged. The next substantive checkpoint is stacked review/integration, followed by a disposable-host receipt and one explicitly authorized prerelease with consumer verification.
